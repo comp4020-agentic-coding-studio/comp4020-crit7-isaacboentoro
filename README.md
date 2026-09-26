@@ -1,36 +1,53 @@
 # Enrolment — an ANUhub slice
 
 The system that reliably ruins my week is ANUhub's unit enrolment flow: a
-unit you want is full, or adding it silently blows your credit-point load
-for the session, and you find out after the fact. This prototype is that one
-slice, wired end to end: a seeded catalog of units, enrol/drop, persisted in
-SQLite, with the two constraints that actually bite enforced server-side
-rather than left to a form that just accepts anything.
+course you want has no places left, or adding it silently blows your
+credit-point load, and you find out after the click rather than before. This
+prototype is that one slice, wired end to end over the **real ANU course
+catalogue** — all 6,003 course offerings for 2026 and 2027, imported from
+Programs and Courses — with the constraints enforced server-side instead of
+left to a form that accepts anything.
+
+## Where the data comes from
+
+`src/data/courses.json` is the ANU Programs and Courses catalogue, fetched by
+`pnpm courses:fetch` (`scripts/fetch-courses.ts`). P&C renders its catalogue
+search client-side from `/data/CourseSearch/GetCourses`, which returns a whole
+commencement year in one response, so the import is two requests rather than a
+crawl of six thousand pages. Course **code, title, session, career and credit
+points are ANU's**.
+
+**Places are not.** P&C publishes no class sizes, so this app derives a
+capacity and a number of places already taken from a hash of the course code —
+deterministic, so it is stable across reseeds and redeploys, and deliberately
+shaped so about one course in sixteen is full and you actually run into the
+constraint while browsing. It is invented data. The page says so under the
+table, and it is the one thing here a marker should not read as ANU fact.
 
 ## What good looks like here
 
-- **A core flow that persists.** Enrol in a unit, reload the page (or come
-  back after a redeploy) and it's still there. Drop it, and it's gone. This
-  is `spec/enrolment.test.ts`'s job: it drives the running app over HTTP and
-  checks the database, not the client, is the source of truth.
-- **The catalog is real reference data, not something the app lets you
-  invent.** Units are seeded once at boot (`src/lib/db.ts`); the app only
-  lets you enrol in or drop from what's seeded, matching how a real
-  timetabling system treats its unit catalog as authoritative.
-- **Capacity is enforced, not decorative.** A unit at its seeded capacity
-  shows "Full" and refuses a further enrol with a real error, not a silent
-  no-op — enforced in `src/lib/db.ts#enrol`, checked in the spec.
-- **The 18 credit-point session cap is enforced.** Enrolling past it is
-  rejected with a message explaining why, same as capacity.
-- **Multi-tab live state.** Capacity and the credit total are shared state:
-  enrol in one tab and every other open tab's numbers update over the
-  existing SSE stream, because a stale "2 places left" is worse than none.
+- **A core flow that persists.** Enrol in a course, reload the page (or come
+  back after a redeploy) and it's still there. Drop it, and it's gone.
+  `spec/enrolment.test.ts` drives the running app over HTTP to check that the
+  database, not the client, is the source of truth.
+- **You can actually find your course.** Six thousand rows is not a page, so
+  the catalogue is a server-rendered search over code and title with career
+  and year filters, capped at 50 results and showing the true match count.
+  Plain GET form, no JavaScript required.
+- **The rules are enforced, not decorative.** A full course refuses an enrol,
+  a second enrol in the same course refuses, and going over 18 credit points
+  refuses — each with a message saying which rule you hit, and each returning
+  you to the search you were reading rather than dumping you back at the top.
+  All four live in one place, `enrol()` in `src/lib/db.ts`.
+- **Multi-tab live state.** Places and the credit total are shared, so
+  enrolling in one tab updates every other open tab over the SSE stream; a
+  stale "12 places left" is worse than none.
 - **What's a judgement call, not a spec-enforced check:** there's no login —
-  "my enrolments" is one shared list, same simplicity level as the starter's
-  guestbook, because modelling per-student accounts wasn't the point of this
-  slice. Prerequisite checking is out of scope too; the two constraints
-  above are the ones that actually caused me pain, and going further would
-  be building a second ANUhub rather than the one annoying slice of it.
+  "my enrolments" is one shared list, so this models one student's session,
+  not a multi-user system. Prerequisites, timetable clashes and program rules
+  are out of scope; the three constraints above are the ones that cost me
+  time, and going further would be rebuilding ANUhub rather than fixing the
+  one slice of it that hurts.
 - The accessibility floor (`spec/invariants.test.ts`) and the deployed
   `/readme/` promise (`spec/readme.test.ts`) are shipped, always-on checks
-  this app keeps green same as any other week's prototype.
+  this app keeps green.
