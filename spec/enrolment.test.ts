@@ -52,6 +52,16 @@ describe("catalogue", () => {
     expect(byTitle).toMatch(/<td>[^<]*Algorithms[^<]*<\/td>/i);
   });
 
+  it("matches each word of the query separately, in any order", async () => {
+    // the searches a student actually types: a spaced course code, a word
+    // the catalogue hyphenates, and two title words the wrong way round
+    expect(await page("?q=COMP+1100")).toContain("COMP1100");
+    expect(await page("?q=human+centred")).toMatch(/Human-Centred/i);
+
+    const reversed = await page("?q=learning+machine");
+    expect(reversed).toMatch(/Machine Learning/i);
+  });
+
   it("narrows a search rather than rendering the whole catalogue", async () => {
     const all = await page();
     expect(all).toContain("showing the first 50");

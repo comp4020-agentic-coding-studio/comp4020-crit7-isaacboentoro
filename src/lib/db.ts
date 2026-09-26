@@ -105,11 +105,22 @@ export type SearchResults = {
   truncated: boolean;
 };
 
+// Every word of the query has to appear somewhere in the code or the title,
+// in any order. Matching the query as one contiguous string instead would
+// mean "COMP 1100" missed COMP1100, "human centred" missed "Human-Centred",
+// and "learning machine" missed "Machine Learning" — the searches a student
+// actually types. `like` is case-insensitive for ASCII in SQLite.
+const MAX_TERMS = 6;
+
 function searchFilter({ q, career, year }: CourseSearch) {
   const clauses = [];
-  if (q) {
-    // `like` is case-insensitive for ASCII in SQLite by default
-    const pattern = `%${q.replaceAll("%", "").replaceAll("_", "")}%`;
+  const terms = (q ?? "")
+    .split(/\s+/)
+    .map((term) => term.replaceAll("%", "").replaceAll("_", ""))
+    .filter(Boolean)
+    .slice(0, MAX_TERMS);
+  for (const term of terms) {
+    const pattern = `%${term}%`;
     clauses.push(or(like(units.code, pattern), like(units.title, pattern)));
   }
   if (career) clauses.push(eq(units.career, career));
