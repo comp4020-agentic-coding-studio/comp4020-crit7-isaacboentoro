@@ -8,6 +8,20 @@
       "when": 1784173013185,
       "tag": "0000_dry_captain_flint",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790421525240,
+      "tag": "0001_smooth_peter_parker",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790421536498,
+      "tag": "0002_condemned_serpent_society",
+      "breakpoints": true
     }
   ]
 }
