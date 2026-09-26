@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, inject, it } from "vitest";
 
 // This app's own contracts, turned into checks per spec/README.md: what the
-// page must do (persist, enforce capacity, enforce the credit cap), not how
-// it's built. Drives the running app over HTTP against the seeded catalog.
+// page must do (find a course in the catalogue, persist an enrolment, refuse
+// one that breaks a rule), not how it's built. Drives the running app over
+// HTTP against the real ANU catalogue seeded from src/data/courses.json.
 const baseUrl = inject("baseUrl");
 
 // Astro checks form POSTs carry a same-origin Origin header (CSRF
@@ -15,83 +16,116 @@ const post = (path: string, body?: URLSearchParams) =>
     redirect: "manual",
   });
 
-const getPage = async () => (await fetch(baseUrl)).text();
+const page = async (query = "") => (await fetch(new URL(`/${query}`, baseUrl))).text();
 
-// Each catalog row is <tr data-unit-id="N"><td>CODE</td>...>, with no
-// whitespace between tags, so this anchors to the row for one specific code.
-function unitId(html: string, code: string): string {
-  const match = html.match(new RegExp(`<tr data-unit-id="(\\d+)"><td>${code}</td>`));
-  if (!match) throw new Error(`seeded unit ${code} not found on the page`);
-  return match[1];
-}
+const enrolled = (html: string) => html.split("<h2>Course catalogue</h2>")[0];
 
-function enrolmentIdFor(html: string, code: string): string {
-  const match = html.match(new RegExp(`${code}[\\s\\S]*?/api/enrolments/(\\d+)/drop`));
-  if (!match) throw new Error(`no enrolment row for ${code} on the page`);
-  return match[1];
+// Each catalogue row is <tr data-unit-id="N"><td>CODE</td>..., with no
+// whitespace between tags, so this anchors to one specific course's row.
+async function find(code: string, year = 2026): Promise<{ id: string; row: string }> {
+  const html = await page(`?q=${code}&year=${year}`);
+  const match = html.match(new RegExp(`<tr data-unit-id="(\\d+)"><td>${code}</td>[\\s\\S]*?</tr>`));
+  if (!match) throw new Error(`${code} (${year}) not found in the catalogue`);
+  return { id: match[1], row: match[0] };
 }
 
 const enrol = (unitId: string) => post("/api/enrolments", new URLSearchParams({ unitId }));
 
+describe("catalogue", () => {
+  it("seeds both published years of the ANU catalogue", async () => {
+    const html = await page();
+    const total = html.match(/<p id="result-count">(\d+) matching/);
+    expect(Number(total?.[1])).toBeGreaterThan(5000);
+
+    // the same course code is offered in more than one year
+    const html2026 = await page("?q=COMP1100&year=2026");
+    const html2027 = await page("?q=COMP1100&year=2027");
+    expect(html2026).toContain("COMP1100");
+    expect(html2027).toContain("COMP1100");
+  });
+
+  it("searches by course code and by words in the title", async () => {
+    const byCode = await page("?q=COMP1100");
+    expect(byCode).toContain("COMP1100");
+
+    const byTitle = await page("?q=Algorithms");
+    expect(byTitle).toMatch(/<td>[^<]*Algorithms[^<]*<\/td>/i);
+  });
+
+  it("narrows a search rather than rendering the whole catalogue", async () => {
+    const all = await page();
+    expect(all).toContain("showing the first 50");
+    expect(all.match(/<tr data-unit-id=/g)?.length).toBe(50);
+  });
+});
+
 describe("enrolment", () => {
-  let comp8420: string; // seeded with capacity 1
-  let comp1100: string; // seeded 6cp
-  let math1115: string; // seeded 6cp
+  let comp1100: string;
+  let comp1110: string;
+  let comp2100: string;
+  let comp2300: string;
 
   beforeAll(async () => {
-    const html = await getPage();
-    comp8420 = unitId(html, "COMP8420");
-    comp1100 = unitId(html, "COMP1100");
-    math1115 = unitId(html, "MATH1115");
+    comp1100 = (await find("COMP1100")).id;
+    comp1110 = (await find("COMP1110")).id;
+    comp2100 = (await find("COMP2100")).id;
+    comp2300 = (await find("COMP2300")).id;
+  });
+
+  it("refuses a course with no places left", async () => {
+    // COMP3600 (2026) is one of the ~340 courses the seed derives as full;
+    // the derivation is deterministic, so this stays true across reseeds.
+    const { id, row } = await find("COMP3600");
+    expect(row).toContain(">Full<");
+
+    const res = await enrol(id);
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/?error=full");
+    expect(enrolled(await page())).not.toContain("COMP3600");
   });
 
   it("enrolling persists across a reload", async () => {
-    const res = await enrol(comp8420);
+    const res = await enrol(comp1100);
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/");
-
-    const html = await getPage();
-    const enrolledSection = html.split("<h2>Catalog</h2>")[0];
-    expect(enrolledSection).toContain("COMP8420");
+    expect(enrolled(await page())).toContain("COMP1100");
   });
 
-  it("rejects enrolling past a unit's capacity", async () => {
-    const res = await enrol(comp8420); // capacity 1, already taken above
-    expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/?error=full");
-
-    const html = await getPage();
-    const enrolledSection = html.split('<h2>Catalog</h2>')[0];
-    expect(enrolledSection.match(/COMP8420/g)).toHaveLength(1);
+  it("refuses enrolling in the same course twice", async () => {
+    const res = await enrol(comp1100);
+    expect(res.headers.get("location")).toBe("/?error=duplicate");
+    expect(enrolled(await page()).match(/COMP1100/g)).toHaveLength(1);
   });
 
-  it("rejects enrolling past the credit point cap", async () => {
-    // COMP8420 (12cp) + COMP1100 (6cp) = 18, right at the cap.
-    const atCap = await enrol(comp1100);
+  it("refuses enrolling past the credit point cap", async () => {
+    await enrol(comp1110);
+    const atCap = await enrol(comp2100); // 3 x 6cp = 18, right at the cap
     expect(atCap.headers.get("location")).toBe("/");
-    let html = await getPage();
-    expect(html).toContain('<span id="credit-count">18</span>');
+    expect(await page()).toContain('<span id="credit-count">18</span>');
 
-    // one more 6cp unit would push to 24
-    const overCap = await enrol(math1115);
+    const overCap = await enrol(comp2300);
     expect(overCap.headers.get("location")).toBe("/?error=over-cap");
 
-    html = await getPage();
+    const html = await page();
     expect(html).toContain('<span id="credit-count">18</span>');
-    const enrolledSection = html.split("<h2>Catalog</h2>")[0];
-    expect(enrolledSection).not.toContain("MATH1115");
+    expect(enrolled(html)).not.toContain("COMP2300");
+  });
+
+  it("returns a rejected enrol to the search it came from", async () => {
+    const res = await post(
+      "/api/enrolments",
+      new URLSearchParams({ unitId: comp2300, q: "COMP", career: "Undergraduate" }),
+    );
+    expect(res.headers.get("location")).toBe("/?q=COMP&career=Undergraduate&error=over-cap");
   });
 
   it("dropping persists across a reload", async () => {
-    const html = await getPage();
-    const id = enrolmentIdFor(html, "COMP1100");
+    const html = await page();
+    const id = enrolled(html).match(/COMP1100[\s\S]*?\/api\/enrolments\/(\d+)\/drop/)?.[1];
+    expect(id).toBeDefined();
 
     const res = await post(`/api/enrolments/${id}/drop`);
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/");
-
-    const after = await getPage();
-    const enrolledSection = after.split("<h2>Catalog</h2>")[0];
-    expect(enrolledSection).not.toContain("COMP1100");
+    expect(enrolled(await page())).not.toContain("COMP1100");
   });
 });
