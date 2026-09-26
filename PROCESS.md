@@ -2,9 +2,11 @@
 
 ## What I built
 
-An enrolment slice of ANUhub: a seeded unit catalog, enrol/drop against it,
-persisted in SQLite, with unit capacity and the 18 credit-point session cap
-enforced server-side.
+An enrolment slice of ANUhub, over the real ANU course catalogue: all 6,003
+course offerings for 2026 and 2027 imported from Programs and Courses,
+searchable, with enrol/drop persisted in SQLite and the enrolment rules —
+no places left, already enrolled, over the 18 credit-point cap — enforced
+server-side.
 
 ## How I got here
 
@@ -48,6 +50,52 @@ directly, subscribed to `/api/events` with curl, POSTed an enrol, and watched
 the SSE event arrive — confirming the multi-tab live-update claim in
 `README.md` against the real running artefact, the same one `spec/` and Fly
 both use.
+
+## Putting the real catalogue in
+
+With the slice working on eight hand-written courses, I replaced them with
+the actual ANU catalogue
+([`4056540...da850e7`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit7-isaacboentoro/compare/4056540...da850e7)).
+
+The grounding step was refusing to scrape. P&C's `/catalogue` renders its
+result tables empty and fills them client-side, so rather than crawling six
+thousand course pages I read the page's own markup for how it talks to its
+backend: a `data-action="/data/CourseSearch/GetCourses"` attribute, and a
+bundle that GETs it with `PageIndex`/`PageSize`/`ShowAll`. Asking that
+endpoint directly with `ShowAll=true` returns an entire commencement year in
+one JSON response. The whole import is two requests, and
+`scripts/fetch-courses.ts` records how, so the data is reproducible rather
+than a one-off dump.
+
+Real data broke three of my assumptions at once, which is the useful part:
+
+- **`code` isn't unique.** The same course is offered in 2026 and 2027, so
+  the key became `(code, year)`.
+- **6,000 rows isn't a page.** The single table I'd written was fine for
+  eight courses and unusable for six thousand, so the catalogue became a
+  server-rendered search — code/title with career and year filters, capped
+  at 50 results with the true match count. Still a plain GET form; still no
+  JavaScript needed.
+- **Nothing stopped you enrolling in the same course twice.** My earlier
+  spec had actually rendered two COMP1100 rows without me noticing it was
+  wrong. Real data made it obvious, and it became the fourth rule.
+
+The decision I want a marker to check hardest: **P&C publishes no class
+sizes.** Capacity is the app's whole point, so I couldn't drop it, and
+inventing numbers that sit in a table next to genuine ANU data is exactly
+how a prototype misleads someone. I derived capacity and places-taken from a
+hash of the course code — deterministic, so a reseed doesn't change what's
+full and the spec can assert on a named course without re-implementing the
+derivation — and then labelled it in the three places a reader will look:
+under the table on the page, in `README.md`, and as a standing rule in
+`CLAUDE.md`. The catalogue fields are ANU's; the places are mine, and the
+app says so.
+
+Verified the same way as before, against the built server: 6,003 rows
+seeded in one transaction, first page load 0.25s, and each of the four
+rejections exercised over HTTP — a full course (`COMP3600` 2026, 206/206),
+a duplicate, the cap at 18cp, and the redirect carrying a search back to
+where it started.
 
 ## Before you ship
 
