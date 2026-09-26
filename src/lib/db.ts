@@ -1,9 +1,10 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import catalogue from "../data/courses.json";
 import { type Enrolment, enrolments, type Unit, units } from "./schema";
 
 // One SQLite file is the app's whole persistent state. In production
@@ -26,48 +27,128 @@ migrate(db, { migrationsFolder: "./drizzle" });
 
 // Real ANU study periods run 18cp as a normal full-time load; going over
 // needs a permission this prototype doesn't model, so it's the hard cap.
-const CREDIT_POINT_CAP = 18;
+export const CREDIT_POINT_CAP = 18;
 
-// The catalog is fixed reference data, not something an enrolment app lets
-// you author — seeded once, at boot, same code path locally and deployed.
-function seedUnits(): void {
-  const existing = db.select({ id: units.id }).from(units).limit(1).all();
-  if (existing.length > 0) return;
-  const seed: Omit<Unit, "id">[] = [
-    { code: "COMP1100", title: "Introduction to Programming and Algorithms", period: "Semester 1", creditPoints: 6, capacity: 4 },
-    { code: "COMP2100", title: "Software Design Methodologies", period: "Semester 1", creditPoints: 6, capacity: 3 },
-    { code: "COMP4020", title: "Agentic Coding Studio", period: "Semester 2", creditPoints: 6, capacity: 2 },
-    { code: "COMP4610", title: "Principles of Programming Languages", period: "Semester 2", creditPoints: 6, capacity: 3 },
-    { code: "MATH1115", title: "Mathematical Foundations for Actuarial Studies", period: "Semester 1", creditPoints: 6, capacity: 5 },
-    { code: "COMP3600", title: "Algorithms", period: "Semester 2", creditPoints: 6, capacity: 3 },
-    { code: "COMP8420", title: "Advanced Network Security", period: "Semester 2", creditPoints: 12, capacity: 1 },
-    { code: "STAT2001", title: "Statistical Techniques for Data Analysis", period: "Semester 1", creditPoints: 6, capacity: 4 },
-  ];
-  for (const unit of seed) db.insert(units).values(unit).run();
+// How many catalogue rows a search shows at once. The catalogue is ~6000
+// courses; a student is looking for one, so the page asks them to narrow
+// rather than rendering the lot.
+export const PAGE_SIZE = 50;
+
+export const YEARS: number[] = [...new Set(catalogue.map((c) => c.year))].sort();
+
+// Programs and Courses publishes no class sizes, so capacity — and how much
+// of it other students have already taken — is the prototype's own, derived
+// from the course code so it is stable across reseeds and redeploys rather
+// than random. It is invented data, labelled as such in the UI and README:
+// everything else about a course comes from P&C.
+function hash(seed: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
 }
-seedUnits();
+
+function derivePlaces(code: string, year: number): { capacity: number; placesTaken: number } {
+  const h = hash(`${code}:${year}`);
+  const capacity = 15 + (h % 386);
+  // roughly one course in sixteen is already full, so "no places left" is
+  // something you actually run into while browsing
+  const fill = (h >>> 9) % 100;
+  const placesTaken = fill < 6 ? capacity : Math.floor((capacity * fill) / 100);
+  return { capacity, placesTaken };
+}
+
+// The catalogue is reference data an enrolment app reads, never authors, so
+// it is loaded once into an empty database — one transaction, because 6000
+// inserts one statement at a time is thousands of fsyncs.
+function seedCatalogue(): void {
+  if (db.select({ id: units.id }).from(units).limit(1).all().length > 0) return;
+  const insert = client.prepare(
+    "insert into units (code, title, period, career, year, credit_points, capacity, places_taken) values (?, ?, ?, ?, ?, ?, ?, ?)",
+  );
+  client.transaction(() => {
+    for (const course of catalogue) {
+      const { capacity, placesTaken } = derivePlaces(course.code, course.year);
+      insert.run(
+        course.code,
+        course.title,
+        course.period,
+        course.career,
+        course.year,
+        course.creditPoints,
+        capacity,
+        placesTaken,
+      );
+    }
+  })();
+}
+seedCatalogue();
 
 export type { Unit, Enrolment };
-export { CREDIT_POINT_CAP };
 
 export type UnitWithAvailability = Unit & { enrolledCount: number; full: boolean };
 export type EnrolmentWithUnit = Enrolment & { unit: Unit };
 
-export function listUnits(): UnitWithAvailability[] {
-  return db
+const enrolledCount = sql<number>`(${units.placesTaken} + (select count(*) from enrolments where enrolments.unit_id = units.id))`;
+
+function withAvailability(unit: Unit & { enrolledCount: number }): UnitWithAvailability {
+  return { ...unit, full: unit.enrolledCount >= unit.capacity };
+}
+
+export type CourseSearch = { q?: string; career?: string; year?: number };
+
+export type SearchResults = {
+  units: UnitWithAvailability[];
+  total: number;
+  truncated: boolean;
+};
+
+function searchFilter({ q, career, year }: CourseSearch) {
+  const clauses = [];
+  if (q) {
+    // `like` is case-insensitive for ASCII in SQLite by default
+    const pattern = `%${q.replaceAll("%", "").replaceAll("_", "")}%`;
+    clauses.push(or(like(units.code, pattern), like(units.title, pattern)));
+  }
+  if (career) clauses.push(eq(units.career, career));
+  if (year) clauses.push(eq(units.year, year));
+  return clauses.length > 0 ? and(...clauses) : undefined;
+}
+
+export function searchUnits(search: CourseSearch): SearchResults {
+  const where = searchFilter(search);
+  const total = db
+    .select({ count: sql<number>`count(*)` })
+    .from(units)
+    .where(where)
+    .get()!.count;
+
+  const rows = db
     .select({
       id: units.id,
       code: units.code,
       title: units.title,
       period: units.period,
+      career: units.career,
+      year: units.year,
       creditPoints: units.creditPoints,
       capacity: units.capacity,
-      enrolledCount: sql<number>`(select count(*) from enrolments where enrolments.unit_id = units.id)`,
+      placesTaken: units.placesTaken,
+      enrolledCount,
     })
     .from(units)
-    .orderBy(units.code)
-    .all()
-    .map((unit) => ({ ...unit, full: unit.enrolledCount >= unit.capacity }));
+    .where(where)
+    .orderBy(units.code, units.year)
+    .limit(PAGE_SIZE)
+    .all();
+
+  return {
+    units: rows.map(withAvailability),
+    total,
+    truncated: total > rows.length,
+  };
 }
 
 export function listEnrolments(): EnrolmentWithUnit[] {
@@ -81,23 +162,32 @@ export function listEnrolments(): EnrolmentWithUnit[] {
 }
 
 export function totalCreditPoints(): number {
-  return listEnrolments().reduce((sum, e) => sum + e.unit.creditPoints, 0);
+  return (
+    db
+      .select({ total: sql<number>`coalesce(sum(${units.creditPoints}), 0)` })
+      .from(enrolments)
+      .innerJoin(units, eq(enrolments.unitId, units.id))
+      .get()?.total ?? 0
+  );
 }
 
 export type EnrolResult =
   | { ok: true; enrolment: EnrolmentWithUnit }
-  | { ok: false; reason: "not-found" | "full" | "over-cap" };
+  | { ok: false; reason: "not-found" | "duplicate" | "full" | "over-cap" };
 
 export function enrol(unitId: number): EnrolResult {
   const unit = db.select().from(units).where(eq(units.id, unitId)).get();
   if (!unit) return { ok: false, reason: "not-found" };
 
-  const enrolledCount = db
-    .select({ count: sql<number>`count(*)` })
+  const already = db
+    .select({ id: enrolments.id })
     .from(enrolments)
     .where(eq(enrolments.unitId, unitId))
-    .get()!.count;
-  if (enrolledCount >= unit.capacity) return { ok: false, reason: "full" };
+    .get();
+  if (already) return { ok: false, reason: "duplicate" };
+
+  // the duplicate check above means this student isn't already one of them
+  if (unit.placesTaken >= unit.capacity) return { ok: false, reason: "full" };
 
   if (totalCreditPoints() + unit.creditPoints > CREDIT_POINT_CAP) {
     return { ok: false, reason: "over-cap" };
@@ -108,6 +198,5 @@ export function enrol(unitId: number): EnrolResult {
 }
 
 export function dropEnrolment(id: number): boolean {
-  const result = db.delete(enrolments).where(eq(enrolments.id, id)).run();
-  return result.changes > 0;
+  return db.delete(enrolments).where(eq(enrolments.id, id)).run().changes > 0;
 }
