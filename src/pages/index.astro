@@ -1,8 +1,18 @@
 ---
-import { listMessages } from "../lib/db";
+import { CREDIT_POINT_CAP, listEnrolments, listUnits, totalCreditPoints } from "../lib/db";
 import "../styles.css";
 
-const messages = listMessages();
+const units = listUnits();
+const enrolments = listEnrolments();
+const credits = totalCreditPoints();
+
+const error = Astro.url.searchParams.get("error");
+const errorMessage =
+  error === "full"
+    ? "That unit is already at capacity."
+    : error === "over-cap"
+      ? `Enrolling would take you over the ${CREDIT_POINT_CAP} credit point cap for the session.`
+      : null;
 ---
 
 <!doctype html>
@@ -10,43 +20,92 @@ const messages = listMessages();
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>COMP4020 prototype</title>
+    <title>Enrolment — COMP4020 prototype</title>
   </head>
   <body>
     <nav aria-label="site">
-      <a href="/">Guestbook</a>
+      <a href="/">Enrolment</a>
       <a href="/readme/">About</a>
     </nav>
     <main>
-      <h1>Guestbook</h1>
+      <h1>Enrolment</h1>
       <p>
-        A minimal full-stack starter: messages live in SQLite on the machine's
-        volume (state survives a reload and a redeploy), and new messages
-        appear in every open tab over a server-sent-events stream — open this
-        page twice and sign it in one. Replace all of this with your own
-        prototype.
+        A slice of ANUhub's unit enrolment: browse the catalog, enrol, and
+        drop — enforcing the two rules that actually bite (a unit at capacity,
+        the {CREDIT_POINT_CAP}cp session cap), and persisting across a
+        reload.
       </p>
-      <form method="post" action="/api/messages">
-        <label for="body">Leave a message</label>
-        <input id="body" name="body" required maxlength="500" />
-        <button>Sign</button>
-      </form>
-      <ul id="messages">
-        {messages.map((message) => <li>{message.body}</li>)}
+
+      {
+        errorMessage && (
+          <p role="alert" id="error">
+            {errorMessage}
+          </p>
+        )
+      }
+
+      <h2>My enrolments</h2>
+      <p id="credit-total">
+        <span id="credit-count">{credits}</span> / {CREDIT_POINT_CAP} credit points this session
+      </p>
+      <ul id="enrolments">
+        {
+          enrolments.map((enrolment) => (
+            <li data-unit-id={enrolment.unit.id}>
+              {enrolment.unit.code} — {enrolment.unit.title} ({enrolment.unit.creditPoints}cp)
+              <form method="post" action={`/api/enrolments/${enrolment.id}/drop`}>
+                <button>Drop</button>
+              </form>
+            </li>
+          ))
+        }
       </ul>
+      {enrolments.length === 0 && <p>No enrolments yet.</p>}
+
+      <h2>Catalog</h2>
+      <table id="catalog">
+        <thead>
+          <tr>
+            <th scope="col">Code</th>
+            <th scope="col">Title</th>
+            <th scope="col">Period</th>
+            <th scope="col">CP</th>
+            <th scope="col">Places</th>
+            <th scope="col">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            units.map((unit) => (
+              <tr data-unit-id={unit.id}>
+                <td>{unit.code}</td>
+                <td>{unit.title}</td>
+                <td>{unit.period}</td>
+                <td>{unit.creditPoints}</td>
+                <td class="places">
+                  {unit.enrolledCount}/{unit.capacity}
+                </td>
+                <td>
+                  <form method="post" action="/api/enrolments">
+                    <input type="hidden" name="unitId" value={unit.id} />
+                    <button disabled={unit.full}>{unit.full ? "Full" : "Enrol"}</button>
+                  </form>
+                </td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
     </main>
     <script>
-      // The live half of the demo: subscribe to the SSE stream and prepend
-      // messages as they arrive. The form itself needs none of this — its
-      // POST + redirect re-renders the submitting tab from SQLite; this
-      // stream is how every other tab finds out.
-      const list = document.querySelector("#messages");
+      // The live half of the demo: subscribe to the SSE stream and reload the
+      // page's data whenever another tab enrols or drops — capacity and the
+      // credit cap are shared state, so every open tab needs to see the
+      // current numbers, not just its own last action. The form itself needs
+      // none of this — its POST + redirect re-renders the submitting tab.
       const source = new EventSource("/api/events");
-      source.addEventListener("message", (event) => {
-        const message = JSON.parse(event.data);
-        const item = document.createElement("li");
-        item.textContent = message.body;
-        list?.prepend(item);
+      source.addEventListener("message", () => {
+        location.reload();
       });
     </script>
   </body>

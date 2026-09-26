@@ -7,8 +7,20 @@ body {
 }
 
 main {
-  max-width: 40rem;
+  max-width: 50rem;
   margin: 0 auto;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #ddd;
 }
 
 a {
@@ -35,6 +47,6 @@ button {
   font: inherit;
 }
 
-#messages {
+#enrolments {
   padding-inline-start: 1.2rem;
 }
