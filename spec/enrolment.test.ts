@@ -70,16 +70,20 @@ describe("catalogue", () => {
 });
 
 describe("enrolment", () => {
+  // five 6cp courses with places left: four fill a standard 24cp load, the
+  // fifth is the one that has to be refused
   let comp1100: string;
   let comp1110: string;
   let comp2100: string;
   let comp2300: string;
+  let comp2310: string;
 
   beforeAll(async () => {
     comp1100 = (await find("COMP1100")).id;
     comp1110 = (await find("COMP1110")).id;
     comp2100 = (await find("COMP2100")).id;
     comp2300 = (await find("COMP2300")).id;
+    comp2310 = (await find("COMP2310")).id;
   });
 
   it("refuses a course with no places left", async () => {
@@ -109,22 +113,23 @@ describe("enrolment", () => {
 
   it("refuses enrolling past the credit point cap", async () => {
     await enrol(comp1110);
-    const atCap = await enrol(comp2100); // 3 x 6cp = 18, right at the cap
+    await enrol(comp2100);
+    const atCap = await enrol(comp2300); // 4 x 6cp = 24, right at the cap
     expect(atCap.headers.get("location")).toBe("/");
-    expect(await page()).toContain('<span id="credit-count">18</span>');
+    expect(await page()).toContain('<span id="credit-count">24</span>');
 
-    const overCap = await enrol(comp2300);
+    const overCap = await enrol(comp2310);
     expect(overCap.headers.get("location")).toBe("/?error=over-cap");
 
     const html = await page();
-    expect(html).toContain('<span id="credit-count">18</span>');
-    expect(enrolled(html)).not.toContain("COMP2300");
+    expect(html).toContain('<span id="credit-count">24</span>');
+    expect(enrolled(html)).not.toContain("COMP2310");
   });
 
   it("returns a rejected enrol to the search it came from", async () => {
     const res = await post(
       "/api/enrolments",
-      new URLSearchParams({ unitId: comp2300, q: "COMP", career: "Undergraduate" }),
+      new URLSearchParams({ unitId: comp2310, q: "COMP", career: "Undergraduate" }),
     );
     expect(res.headers.get("location")).toBe("/?q=COMP&career=Undergraduate&error=over-cap");
   });

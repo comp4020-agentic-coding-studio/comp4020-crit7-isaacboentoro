@@ -25,9 +25,10 @@ export const db = drizzle(client);
 // commit the migration it writes to drizzle/.
 migrate(db, { migrationsFolder: "./drizzle" });
 
-// Real ANU study periods run 18cp as a normal full-time load; going over
-// needs a permission this prototype doesn't model, so it's the hard cap.
-export const CREDIT_POINT_CAP = 18;
+// A standard full-time ANU load is 24cp in a session — four 6cp courses.
+// Going over needs a permission this prototype doesn't model, so it's the
+// hard cap.
+export const CREDIT_POINT_CAP = 24;
 
 // How many catalogue rows a search shows at once. The catalogue is ~6000
 // courses; a student is looking for one, so the page asks them to narrow

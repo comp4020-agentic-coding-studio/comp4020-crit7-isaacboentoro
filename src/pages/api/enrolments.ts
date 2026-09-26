@@ -5,7 +5,7 @@ import { bus } from "../../lib/events";
 // A plain HTML form POSTs here; the 303 redirect makes it work with no
 // client-side JavaScript at all — the submitting tab re-renders from the
 // database, and every *other* open tab hears about it over the SSE stream.
-// Capacity and the 18cp cap are real constraints (see src/lib/db.ts), not
+// Capacity and the credit cap are real constraints (see src/lib/db.ts), not
 // validation for its own sake, so a rejection redirects with a reason the
 // page can show rather than silently doing nothing.
 //

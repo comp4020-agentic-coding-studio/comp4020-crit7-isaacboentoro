@@ -35,7 +35,7 @@ table, and it is the one thing here a marker should not read as ANU fact.
   and year filters, capped at 50 results and showing the true match count.
   Plain GET form, no JavaScript required.
 - **The rules are enforced, not decorative.** A full course refuses an enrol,
-  a second enrol in the same course refuses, and going over 18 credit points
+  a second enrol in the same course refuses, and going over 24 credit points
   refuses — each with a message saying which rule you hit, and each returning
   you to the search you were reading rather than dumping you back at the top.
   All four live in one place, `enrol()` in `src/lib/db.ts`.

@@ -5,7 +5,7 @@
 An enrolment slice of ANUhub, over the real ANU course catalogue: all 6,003
 course offerings for 2026 and 2027 imported from Programs and Courses,
 searchable, with enrol/drop persisted in SQLite and the enrolment rules —
-no places left, already enrolled, over the 18 credit-point cap — enforced
+no places left, already enrolled, over the 24 credit-point cap — enforced
 server-side.
 
 ## How I got here
@@ -94,7 +94,7 @@ app says so.
 Verified the same way as before, against the built server: 6,003 rows
 seeded in one transaction, first page load 0.25s, and each of the four
 rejections exercised over HTTP — a full course (`COMP3600` 2026, 206/206),
-a duplicate, the cap at 18cp, and the redirect carrying a search back to
+a duplicate, the cap at 24cp, and the redirect carrying a search back to
 where it started.
 
 ## Before you ship
