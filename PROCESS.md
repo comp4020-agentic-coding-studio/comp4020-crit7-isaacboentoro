@@ -1,54 +1,55 @@
 # Process overview
 
-<!-- TEMPLATE: this file is a shape to fill in, not a form. Replace everything
-     in it with your own overview, and delete this comment — `pnpm
-     check:evidence` will remind you if it's still here. -->
-
-Written by you, for a reader: how you got from the brief to the harness and
-agentic workflow behind this submission. Markers read this file and follow its
-citations; they don't trawl the repo for evidence you didn't point at.
-
-This file is the shape; the course site's
-[assessment page](https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/topics/assessment/#what-you-submit)
-is the requirement, and its
-[word counts](https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/topics/assessment/#word-counts)
-cover every deliverable.
-
 ## What I built
 
-A sentence or two. `README.md` is where the account of what the app is and what
-good means here lives; this file is how you got there.
+An enrolment slice of ANUhub: a seeded unit catalog, enrol/drop against it,
+persisted in SQLite, with unit capacity and the 18 credit-point session cap
+enforced server-side.
 
 ## How I got here
 
-The account of the process: how the work actually went, and how you knew the
-result was right. Tell it in whatever order makes it clear. A weekly prototype
-needs a paragraph or two; an assignment needs more.
+The brief (C7: build the ANU system you wish existed) asks for one annoying
+slice of a real ANU system, wired end to end, not a whole rebuild. I picked
+unit enrolment over timetabling/room booking because the two failure modes
+that actually cost me time are silent: a unit fills up, or an add pushes me
+over my credit-point load, and ANUhub tells you after the click, not before.
 
-Cite the record as you go, as links whose text is the commit hash or range and
-whose target is this repo's commit or compare URL, so a reader clicks straight
-to the evidence:
+I read `spec/README.md` first to see what's already shipped (invariants,
+the README promise, the starter's guestbook check) versus what's mine to
+write, so I knew not to duplicate the accessibility/route-coverage checks
+and to replace, not keep, the guestbook's own test once its plumbing was
+gone.
 
-- one commit: [`a1b2c3d`](https://github.com/YOUR-ORG/YOUR-REPO/commit/a1b2c3d)
-- a range:
-  [`a1b2c3d...e4f5a6b`](https://github.com/YOUR-ORG/YOUR-REPO/compare/a1b2c3d...e4f5a6b)
+Build order followed the data first: schema
+([`6d4be2d`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit7-isaacboentoro/commit/6d4be2d)),
+then the rules that make this more than CRUD — capacity and the credit cap
+live in one place (`enrol()`), not scattered across routes
+([`7319b88`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit7-isaacboentoro/commit/7319b88)),
+then the HTTP surface and the page
+([`1e5d44b...7d77f86`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit7-isaacboentoro/compare/1e5d44b...7d77f86)).
 
-To pair a prompt with the commit it produced, quote the prompt (curated, not a
-full transcript) next to the citation:
+`pnpm db:generate` hung under the agent's non-interactive shell the first
+time — drizzle-kit wanted a TTY to ask whether dropping `messages` while
+adding `units`/`enrolments` was a rename. Splitting the schema edit into a
+pure drop, generated on its own, then a pure add, generated on its own,
+avoided the ambiguity entirely rather than working around the prompt. That's
+now a rule in `CLAUDE.md` so it doesn't cost time again.
 
-> the prompt, verbatim
+I wrote `spec/enrolment.test.ts` to check the app's own promises, not
+mechanics: persistence across a reload, capacity actually blocking a full
+unit, the credit cap actually blocking an over-limit enrol. First pass had a
+regex bug in the test itself (matching the first catalog row's id regardless
+of which unit code I asked for), caught because the capacity assertion
+failed for a unit that should have been full — the test lied about which
+unit it was hitting, not the app misbehaving.
 
-Screenshots are welcome where one carries the point better than a sentence does.
-Commit the file to this repo and link it with a **relative** path, which is what
-makes it render on GitHub: `![alt text](docs/before.png)`. Images don't count
-towards the word count and don't replace the citation.
+Verified end to end, not just via `pnpm check`: ran the built server
+directly, subscribed to `/api/events` with curl, POSTed an enrol, and watched
+the SSE event arrive — confirming the multi-tab live-update claim in
+`README.md` against the real running artefact, the same one `spec/` and Fly
+both use.
 
 ## Before you ship
 
-`pnpm check:evidence` verifies that this comment is gone, that your citations
-resolve to real commits, that a crit week's reflection entry is in
-`reflections/`, and that your `CLAUDE.md` is there. It checks that your account
-is traceable, not that it is good: that is the marker's call.
-
-Images aren't checked: unlike a citation whose SHA doesn't resolve, a broken
-image is visible the moment this file is rendered on GitHub.
+`pnpm check:evidence` passing, `pnpm check` green, deployed to
+`comp4020-crit7-isaacboentoro.fly.dev`.
