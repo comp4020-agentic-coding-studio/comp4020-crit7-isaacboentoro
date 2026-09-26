@@ -1,18 +1,33 @@
 ---
-import { CREDIT_POINT_CAP, listEnrolments, listUnits, totalCreditPoints } from "../lib/db";
+import {
+  CREDIT_POINT_CAP,
+  listEnrolments,
+  PAGE_SIZE,
+  searchUnits,
+  totalCreditPoints,
+  YEARS,
+} from "../lib/db";
 import "../styles.css";
 
-const units = listUnits();
+const params = Astro.url.searchParams;
+const q = (params.get("q") ?? "").trim();
+const career = (params.get("career") ?? "").trim();
+const year = Number(params.get("year")) || undefined;
+
+const results = searchUnits({ q, career, year });
 const enrolments = listEnrolments();
 const credits = totalCreditPoints();
 
-const error = Astro.url.searchParams.get("error");
-const errorMessage =
-  error === "full"
-    ? "That unit is already at capacity."
-    : error === "over-cap"
-      ? `Enrolling would take you over the ${CREDIT_POINT_CAP} credit point cap for the session.`
-      : null;
+const CAREERS = ["Undergraduate", "Postgraduate", "Research"];
+
+const errorMessage = {
+  full: "That course has no places left.",
+  duplicate: "You're already enrolled in that course.",
+  "over-cap": `Enrolling would take you over the ${CREDIT_POINT_CAP} credit point cap for the session.`,
+}[params.get("error") ?? ""];
+
+// carried through the enrol form so a rejection returns you to this search
+const searchState = { q, career, year: year ? String(year) : "" };
 ---
 
 <!doctype html>
@@ -20,7 +35,7 @@ const errorMessage =
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Enrolment — COMP4020 prototype</title>
+    <title>Enrolment — ANU course catalogue</title>
   </head>
   <body>
     <nav aria-label="site">
@@ -30,79 +45,127 @@ const errorMessage =
     <main>
       <h1>Enrolment</h1>
       <p>
-        A slice of ANUhub's unit enrolment: browse the catalog, enrol, and
-        drop — enforcing the two rules that actually bite (a unit at capacity,
-        the {CREDIT_POINT_CAP}cp session cap), and persisting across a
-        reload.
+        Search the ANU course catalogue and enrol, with the two rules that
+        actually bite enforced before you click rather than after: a course
+        with no places left, and the {CREDIT_POINT_CAP} credit point cap for
+        the session.
       </p>
 
-      {
-        errorMessage && (
-          <p role="alert" id="error">
-            {errorMessage}
-          </p>
-        )
-      }
+      {errorMessage && <p role="alert" id="error">{errorMessage}</p>}
 
       <h2>My enrolments</h2>
       <p id="credit-total">
-        <span id="credit-count">{credits}</span> / {CREDIT_POINT_CAP} credit points this session
+        <span id="credit-count">{credits}</span> / {CREDIT_POINT_CAP} credit points
       </p>
-      <ul id="enrolments">
-        {
-          enrolments.map((enrolment) => (
-            <li data-unit-id={enrolment.unit.id}>
-              {enrolment.unit.code} — {enrolment.unit.title} ({enrolment.unit.creditPoints}cp)
-              <form method="post" action={`/api/enrolments/${enrolment.id}/drop`}>
-                <button>Drop</button>
-              </form>
-            </li>
-          ))
-        }
-      </ul>
-      {enrolments.length === 0 && <p>No enrolments yet.</p>}
+      {
+        enrolments.length === 0 ? (
+          <p>Nothing enrolled yet — search the catalogue below.</p>
+        ) : (
+          <ul id="enrolments">
+            {enrolments.map((enrolment) => (
+              <li>
+                <span>
+                  {enrolment.unit.code} ({enrolment.unit.year}) — {enrolment.unit.title} (
+                  {enrolment.unit.creditPoints}cp)
+                </span>
+                <form method="post" action={`/api/enrolments/${enrolment.id}/drop`}>
+                  <button>Drop</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )
+      }
 
-      <h2>Catalog</h2>
-      <table id="catalog">
-        <thead>
-          <tr>
-            <th scope="col">Code</th>
-            <th scope="col">Title</th>
-            <th scope="col">Period</th>
-            <th scope="col">CP</th>
-            <th scope="col">Places</th>
-            <th scope="col">Action</th>
-          </tr>
-        </thead>
-        <tbody>
+      <h2>Course catalogue</h2>
+      <form method="get" action="/" id="search">
+        <label for="q">Search by code or title</label>
+        <input id="q" name="q" value={q} placeholder="COMP1100, or 'algorithms'" />
+        <label for="career">Career</label>
+        <select id="career" name="career">
+          <option value="">All</option>
           {
-            units.map((unit) => (
-              <tr data-unit-id={unit.id}>
-                <td>{unit.code}</td>
-                <td>{unit.title}</td>
-                <td>{unit.period}</td>
-                <td>{unit.creditPoints}</td>
-                <td class="places">
-                  {unit.enrolledCount}/{unit.capacity}
-                </td>
-                <td>
-                  <form method="post" action="/api/enrolments">
-                    <input type="hidden" name="unitId" value={unit.id} />
-                    <button disabled={unit.full}>{unit.full ? "Full" : "Enrol"}</button>
-                  </form>
-                </td>
-              </tr>
+            CAREERS.map((option) => (
+              <option value={option} selected={option === career}>
+                {option}
+              </option>
             ))
           }
-        </tbody>
-      </table>
+        </select>
+        <label for="year">Year</label>
+        <select id="year" name="year">
+          <option value="">All</option>
+          {
+            YEARS.map((option) => (
+              <option value={option} selected={option === year}>
+                {option}
+              </option>
+            ))
+          }
+        </select>
+        <button>Search</button>
+      </form>
+
+      <p id="result-count">
+        {results.total} matching {results.total === 1 ? "course" : "courses"}
+        {results.truncated && <span> — showing the first {PAGE_SIZE}</span>}
+      </p>
+
+      {
+        results.total > 0 && (
+          <div class="table-scroll">
+          <table id="catalogue">
+            <thead>
+              <tr>
+                <th scope="col">Code</th>
+                <th scope="col">Title</th>
+                <th scope="col">Year</th>
+                <th scope="col">Session</th>
+                <th scope="col">CP</th>
+                <th scope="col">Places</th>
+                <th scope="col">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.units.map((unit) => (
+                <tr data-unit-id={unit.id}>
+                  <td>{unit.code}</td>
+                  <td>{unit.title}</td>
+                  <td>{unit.year}</td>
+                  <td>{unit.period || "Not published"}</td>
+                  <td>{unit.creditPoints}</td>
+                  <td class="places">
+                    {unit.enrolledCount}/{unit.capacity}
+                  </td>
+                  <td>
+                    <form method="post" action="/api/enrolments">
+                      <input type="hidden" name="unitId" value={unit.id} />
+                      <input type="hidden" name="q" value={searchState.q} />
+                      <input type="hidden" name="career" value={searchState.career} />
+                      <input type="hidden" name="year" value={searchState.year} />
+                      <button disabled={unit.full}>{unit.full ? "Full" : "Enrol"}</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        )
+      }
+
+      <p class="note">
+        Course codes, titles, sessions, careers and credit points come from
+        ANU Programs and Courses. Places are this prototype's own invention —
+        the catalogue publishes no class sizes.
+      </p>
     </main>
     <script>
-      // The live half of the demo: subscribe to the SSE stream and reload the
-      // page's data whenever another tab enrols or drops — capacity and the
-      // credit cap are shared state, so every open tab needs to see the
-      // current numbers, not just its own last action. The form itself needs
-      // none of this — its POST + redirect re-renders the submitting tab.
+      // The live half of the demo: subscribe to the SSE stream and reload
+      // whenever another tab enrols or drops — places and the credit total
+      // are shared state, so every open tab needs the current numbers, not
+      // just its own last action. The forms need none of this; their POST +
+      // redirect re-renders the submitting tab.
       const source = new EventSource("/api/events");
       source.addEventListener("message", () => {
         location.reload();

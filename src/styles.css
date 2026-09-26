@@ -7,8 +7,12 @@ body {
 }
 
 main {
-  max-width: 50rem;
+  max-width: 64rem;
   margin: 0 auto;
+}
+
+.table-scroll {
+  overflow-x: auto;
 }
 
 table {
@@ -49,4 +53,29 @@ button {
 
 #enrolments {
   padding-inline-start: 1.2rem;
+}
+
+#enrolments li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#enrolments form {
+  margin-block: 0.25rem;
+}
+
+#catalogue form {
+  margin-block: 0;
+}
+
+#search label {
+  font-weight: 600;
+}
+
+.note {
+  color: #555;
+  font-size: 0.9rem;
 }
