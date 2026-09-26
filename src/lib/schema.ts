@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { int, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, int, sqliteTable, text, unique } from "drizzle-orm/sqlite-core";
 
 // The schema is the ground truth for the database. To change it: edit here,
 // run `pnpm db:generate` to turn the diff into a migration under drizzle/,
@@ -7,19 +7,37 @@ import { int, sqliteTable, text } from "drizzle-orm/sqlite-core";
 // boots (see src/lib/db.ts), locally and deployed. Never edit the database
 // by hand: state on the deployed volume outlives every deploy, and the
 // migration trail is what keeps old state and new code compatible.
-export const units = sqliteTable("units", {
-  id: int().primaryKey({ autoIncrement: true }),
-  code: text().notNull().unique(),
-  title: text().notNull(),
-  period: text().notNull(),
-  creditPoints: int("credit_points").notNull(),
-  capacity: int().notNull(),
-});
 
+// One row per course offering in the ANU Programs and Courses catalogue.
+// code, title, period, career and creditPoints are P&C's (see
+// scripts/fetch-courses.ts); capacity and placesTaken are the prototype's
+// own, because P&C publishes no class sizes — src/lib/db.ts derives them.
+export const units = sqliteTable(
+  "units",
+  {
+    id: int().primaryKey({ autoIncrement: true }),
+    code: text().notNull(),
+    title: text().notNull(),
+    period: text().notNull(),
+    career: text().notNull(),
+    year: int().notNull(),
+    creditPoints: int("credit_points").notNull(),
+    capacity: int().notNull(),
+    placesTaken: int("places_taken").notNull(),
+  },
+  (table) => [
+    unique("units_code_year").on(table.code, table.year),
+    index("units_year").on(table.year),
+  ],
+);
+
+// No accounts in this prototype: these rows are the one student's enrolments,
+// so a unit appears at most once.
 export const enrolments = sqliteTable("enrolments", {
   id: int().primaryKey({ autoIncrement: true }),
   unitId: int("unit_id")
     .notNull()
+    .unique()
     .references(() => units.id),
   createdAt: text("created_at")
     .notNull()
