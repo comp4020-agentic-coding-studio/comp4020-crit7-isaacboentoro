@@ -2,7 +2,9 @@
 import {
   CREDIT_POINT_CAP,
   creditPointsBySession,
+  listCompleted,
   listEnrolments,
+  missingFor,
   NOT_PUBLISHED,
   PAGE_SIZE,
   searchUnits,
@@ -20,6 +22,8 @@ const year = Number(params.get("year")) || undefined;
 const results = searchUnits({ q, career, year, session });
 const enrolments = listEnrolments();
 const load = creditPointsBySession();
+const completed = listCompleted();
+const completedSet = new Set(completed);
 
 const CAREERS = ["Undergraduate", "Postgraduate", "Research"];
 
@@ -30,12 +34,17 @@ const enrolledSessions = [
 ];
 
 const errorMessage = {
-  full: "That course has no places left.",
+  full: "That course has no places left. A permission code for it would let you in.",
   duplicate: "You're already enrolled in that course.",
   "not-offered": "That course has no published session, so it isn't offered.",
   "bad-session": "That course isn't offered in the session you picked.",
-  "over-cap": `That would take that session over the ${CREDIT_POINT_CAP} credit point cap.`,
+  "over-cap": `That would take that session over the ${CREDIT_POINT_CAP} credit point cap. A permission code would let you overload.`,
+  prereq: "You haven't completed that course's prerequisites. A permission code would let you in.",
+  "bad-code": "That permission code isn't valid for this course, or it has already been used.",
+  "bad-course-code": "That doesn't look like a course code — try something like COMP1100.",
 }[params.get("error") ?? ""];
+
+const usedCode = params.get("used");
 
 // carried through the enrol form so a rejection returns you to this search
 const searchState = { q, career, session, year: year ? String(year) : "" };
@@ -75,6 +84,14 @@ const searchState = { q, career, session, year: year ? String(year) : "" };
       </p>
 
       {errorMessage && <p role="alert" id="error">{errorMessage}</p>}
+      {
+        usedCode && (
+          <p role="status" id="used-code">
+            Enrolled using permission code <strong>{usedCode}</strong>. It's now been used and
+            won't work again.
+          </p>
+        )
+      }
 
       <h2>My enrolments</h2>
       {
@@ -112,6 +129,35 @@ const searchState = { q, career, session, year: year ? String(year) : "" };
               </section>
             ))}
           </div>
+        )
+      }
+
+      <h2>Completed courses</h2>
+      <p class="lede">
+        What you've already passed. Prerequisites are checked against this —
+        add COMP1100 and COMP1110 opens up.
+      </p>
+      <form method="post" action="/api/completed" id="add-completed">
+        <p class="field">
+          <label for="completed-code">Course code</label>
+          <input id="completed-code" name="code" placeholder="COMP1100" required />
+        </p>
+        <p class="field"><button>Add</button></p>
+      </form>
+      {
+        completed.length === 0 ? (
+          <p>Nothing recorded yet.</p>
+        ) : (
+          <ul id="completed">
+            {completed.map((code) => (
+              <li>
+                <strong>{code}</strong>
+                <form method="post" action={`/api/completed/${code}/remove`}>
+                  <button class="ghost">Remove</button>
+                </form>
+              </li>
+            ))}
+          </ul>
         )
       }
 
@@ -178,6 +224,7 @@ const searchState = { q, career, session, year: year ? String(year) : "" };
                   <th scope="col">Title</th>
                   <th scope="col">Year</th>
                   <th scope="col">Sessions</th>
+                  <th scope="col">Requisites</th>
                   <th scope="col">CP</th>
                   <th scope="col">Places</th>
                   <th scope="col">Action</th>
@@ -196,9 +243,37 @@ const searchState = { q, career, session, year: year ? String(year) : "" };
                         unit.sessions.map((name) => <span class="chip">{name}</span>)
                       )}
                     </td>
+                    <td class="requisites">
+                      {
+                        unit.requisiteText ? (
+                          <details>
+                            <summary>
+                              {missingFor(unit, completedSet).length > 0 ? (
+                                <span class="chip chip--blocked">
+                                  Need {missingFor(unit, completedSet).join(" or ")}
+                                </span>
+                              ) : unit.requisiteRule ? (
+                                <span class="chip">Requisites met</span>
+                              ) : (
+                                <span class="chip chip--none">Read the requisites</span>
+                              )}
+                            </summary>
+                            <p>{unit.requisiteText}</p>
+                            {!unit.requisiteRule && (
+                              <p class="cap-note">
+                                Stated by ANU but not machine-checked here, so it isn't enforced.
+                              </p>
+                            )}
+                          </details>
+                        ) : (
+                          <span class="cap-note">—</span>
+                        )
+                      }
+                    </td>
                     <td>{unit.creditPoints}</td>
                     <td class="places">
                       {unit.enrolledCount}/{unit.capacity}
+                      {unit.full && <span class="chip chip--blocked">Full</span>}
                     </td>
                     <td>
                       <form method="post" action="/api/enrolments" class="enrol">
@@ -219,8 +294,15 @@ const searchState = { q, career, session, year: year ? String(year) : "" };
                         ) : (
                           <input type="hidden" name="enrolSession" value={unit.sessions[0] ?? ""} />
                         )}
-                        <button disabled={unit.full || unit.sessions.length === 0}>
-                          {unit.sessions.length === 0 ? "Not offered" : unit.full ? "Full" : "Enrol"}
+                        <input
+                          type="text"
+                          name="permissionCode"
+                          class="code-entry"
+                          placeholder="Permission code"
+                          aria-label={`Permission code for ${unit.code}`}
+                        />
+                        <button disabled={unit.sessions.length === 0}>
+                          {unit.sessions.length === 0 ? "Not offered" : "Enrol"}
                         </button>
                       </form>
                     </td>

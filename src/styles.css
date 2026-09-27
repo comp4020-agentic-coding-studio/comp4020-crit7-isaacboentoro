@@ -298,6 +298,70 @@ tbody tr:nth-child(even) {
   color: var(--grey);
 }
 
+/* a blocked state reads as blocked from the words, not the colour alone */
+.chip--blocked {
+  background: #fff;
+  border-color: var(--black);
+  color: var(--black);
+  font-weight: 700;
+}
+
+#used-code {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  background: var(--tint);
+  border-left: 5px solid var(--black);
+}
+
+#completed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+#completed li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--rule);
+}
+
+#completed form,
+#add-completed {
+  margin: 0;
+}
+
+#add-completed {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+}
+
+.requisites {
+  max-width: 20rem;
+}
+
+.requisites summary {
+  cursor: pointer;
+}
+
+.requisites p {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+}
+
+.code-entry {
+  min-width: 9rem;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.4rem;
+}
+
 form.enrol {
   display: flex;
   flex-wrap: wrap;
