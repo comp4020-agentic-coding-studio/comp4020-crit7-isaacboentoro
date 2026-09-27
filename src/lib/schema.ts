@@ -31,14 +31,37 @@ export const units = sqliteTable(
   ],
 );
 
+// P&C publishes a course's sessions as one "/"-joined string; this is that
+// string parsed, one row per session a course is actually offered in, so a
+// session can be filtered and enrolled against.
+export const unitSessions = sqliteTable(
+  "unit_sessions",
+  {
+    id: int().primaryKey({ autoIncrement: true }),
+    unitId: int("unit_id")
+      .notNull()
+      .references(() => units.id),
+    session: text().notNull(),
+  },
+  (table) => [
+    unique("unit_sessions_unit_session").on(table.unitId, table.session),
+    index("unit_sessions_session").on(table.session),
+  ],
+);
+
 // No accounts in this prototype: these rows are the one student's enrolments,
-// so a unit appears at most once.
+// so a unit appears at most once. `session` is which offering of the course
+// was enrolled in — the credit cap applies within a session, not across all
+// of them.
 export const enrolments = sqliteTable("enrolments", {
   id: int().primaryKey({ autoIncrement: true }),
   unitId: int("unit_id")
     .notNull()
     .unique()
     .references(() => units.id),
+  // defaulted so the column can be added to a table that already holds
+  // enrolments; src/lib/db.ts backfills those rows at boot
+  session: text().notNull().default(""),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -46,3 +69,4 @@ export const enrolments = sqliteTable("enrolments", {
 
 export type Unit = typeof units.$inferSelect;
 export type Enrolment = typeof enrolments.$inferSelect;
+export type UnitSession = typeof unitSessions.$inferSelect;
