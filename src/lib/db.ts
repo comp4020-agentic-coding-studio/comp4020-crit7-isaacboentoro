@@ -1,11 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
-import { and, eq, like, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import catalogue from "../data/courses.json";
-import { type Enrolment, enrolments, type Unit, units } from "./schema";
+import { type Enrolment, enrolments, type Unit, units, unitSessions } from "./schema";
 
 // One SQLite file is the app's whole persistent state. In production
 // fly.toml points DATABASE_PATH at the machine's volume (/data), which is
@@ -27,8 +27,42 @@ migrate(db, { migrationsFolder: "./drizzle" });
 
 // A standard full-time ANU load is 24cp in a session — four 6cp courses.
 // Going over needs a permission this prototype doesn't model, so it's the
-// hard cap.
+// hard cap. It applies *within* a session: four courses in First Semester
+// and four more in Second Semester is a normal year, not an overload.
 export const CREDIT_POINT_CAP = 24;
+
+// The sessions the catalogue uses, in the order P&C's own multi-session
+// strings put them ("Summer Session/First Semester/Autumn Session/..." and
+// "Quarter 1/First Semester/Quarter 2/...").
+export const SESSIONS = [
+  "Summer Session",
+  "Quarter 1",
+  "First Semester",
+  "Autumn Session",
+  "Quarter 2",
+  "Winter Session",
+  "Quarter 3",
+  "Second Semester",
+  "Spring Session",
+  "Quarter 4",
+] as const;
+
+// Where enrolments made before sessions existed end up. Nothing can be
+// enrolled into it — a course P&C gives no session isn't offered — so it
+// sits outside every cap.
+export const NOT_PUBLISHED = "Not published";
+
+function parseSessions(period: string): string[] {
+  const seen = new Set(
+    period
+      .split("/")
+      .map((part) => part.trim())
+      .filter(Boolean),
+  );
+  const known = SESSIONS.filter((session) => seen.delete(session));
+  // anything P&C starts publishing that isn't in the list above still shows
+  return [...known, ...seen];
+}
 
 // How many catalogue rows a search shows at once. The catalogue is ~6000
 // courses; a student is looking for one, so the page asks them to narrow
@@ -69,10 +103,13 @@ function seedCatalogue(): void {
   const insert = client.prepare(
     "insert into units (code, title, period, career, year, credit_points, capacity, places_taken) values (?, ?, ?, ?, ?, ?, ?, ?)",
   );
+  const insertSession = client.prepare(
+    "insert into unit_sessions (unit_id, session) values (?, ?)",
+  );
   client.transaction(() => {
     for (const course of catalogue) {
       const { capacity, placesTaken } = derivePlaces(course.code, course.year);
-      insert.run(
+      const { lastInsertRowid } = insert.run(
         course.code,
         course.title,
         course.period,
@@ -82,23 +119,52 @@ function seedCatalogue(): void {
         capacity,
         placesTaken,
       );
+      for (const session of parseSessions(course.period)) {
+        insertSession.run(Number(lastInsertRowid), session);
+      }
     }
   })();
 }
 seedCatalogue();
 
+// Enrolments made before sessions existed carry session = "". Give each one
+// its course's first session so it still counts against a cap, and park the
+// ones whose course publishes none under NOT_PUBLISHED rather than deleting
+// somebody's enrolment to tidy up the schema.
+function backfillEnrolmentSessions(): void {
+  const stale = db
+    .select({ id: enrolments.id, unitId: enrolments.unitId })
+    .from(enrolments)
+    .where(eq(enrolments.session, ""))
+    .all();
+  for (const row of stale) {
+    const first = db
+      .select({ session: unitSessions.session })
+      .from(unitSessions)
+      .where(eq(unitSessions.unitId, row.unitId))
+      .orderBy(asc(unitSessions.id))
+      .get();
+    db.update(enrolments)
+      .set({ session: first?.session ?? NOT_PUBLISHED })
+      .where(eq(enrolments.id, row.id))
+      .run();
+  }
+}
+backfillEnrolmentSessions();
+
 export type { Unit, Enrolment };
 
-export type UnitWithAvailability = Unit & { enrolledCount: number; full: boolean };
+export type UnitWithAvailability = Unit & {
+  enrolledCount: number;
+  full: boolean;
+  sessions: string[];
+};
 export type EnrolmentWithUnit = Enrolment & { unit: Unit };
 
 const enrolledCount = sql<number>`(${units.placesTaken} + (select count(*) from enrolments where enrolments.unit_id = units.id))`;
 
-function withAvailability(unit: Unit & { enrolledCount: number }): UnitWithAvailability {
-  return { ...unit, full: unit.enrolledCount >= unit.capacity };
-}
 
-export type CourseSearch = { q?: string; career?: string; year?: number };
+export type CourseSearch = { q?: string; career?: string; year?: number; session?: string };
 
 export type SearchResults = {
   units: UnitWithAvailability[];
@@ -113,7 +179,7 @@ export type SearchResults = {
 // actually types. `like` is case-insensitive for ASCII in SQLite.
 const MAX_TERMS = 6;
 
-function searchFilter({ q, career, year }: CourseSearch) {
+function searchFilter({ q, career, year, session }: CourseSearch) {
   const clauses = [];
   const terms = (q ?? "")
     .split(/\s+/)
@@ -126,7 +192,43 @@ function searchFilter({ q, career, year }: CourseSearch) {
   }
   if (career) clauses.push(eq(units.career, career));
   if (year) clauses.push(eq(units.year, year));
+  if (session) {
+    clauses.push(
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(unitSessions)
+          .where(and(eq(unitSessions.unitId, units.id), eq(unitSessions.session, session))),
+      ),
+    );
+  }
   return clauses.length > 0 ? and(...clauses) : undefined;
+}
+
+export function sessionsFor(unitId: number): string[] {
+  return db
+    .select({ session: unitSessions.session })
+    .from(unitSessions)
+    .where(eq(unitSessions.unitId, unitId))
+    .orderBy(asc(unitSessions.id))
+    .all()
+    .map((row) => row.session);
+}
+
+// one query for the whole result page rather than one per row
+function sessionsByUnit(unitIds: number[]): Map<number, string[]> {
+  const byUnit = new Map<number, string[]>();
+  if (unitIds.length === 0) return byUnit;
+  const rows = db
+    .select({ unitId: unitSessions.unitId, session: unitSessions.session })
+    .from(unitSessions)
+    .where(sql`${unitSessions.unitId} in ${unitIds}`)
+    .orderBy(asc(unitSessions.id))
+    .all();
+  for (const row of rows) {
+    byUnit.set(row.unitId, [...(byUnit.get(row.unitId) ?? []), row.session]);
+  }
+  return byUnit;
 }
 
 export function searchUnits(search: CourseSearch): SearchResults {
@@ -156,8 +258,14 @@ export function searchUnits(search: CourseSearch): SearchResults {
     .limit(PAGE_SIZE)
     .all();
 
+  const sessions = sessionsByUnit(rows.map((row) => row.id));
+
   return {
-    units: rows.map(withAvailability),
+    units: rows.map((row) => ({
+      ...row,
+      full: row.enrolledCount >= row.capacity,
+      sessions: sessions.get(row.id) ?? [],
+    })),
     total,
     truncated: total > rows.length,
   };
@@ -173,23 +281,36 @@ export function listEnrolments(): EnrolmentWithUnit[] {
     .map(({ enrolment, unit }) => ({ ...enrolment, unit }));
 }
 
-export function totalCreditPoints(): number {
-  return (
-    db
-      .select({ total: sql<number>`coalesce(sum(${units.creditPoints}), 0)` })
-      .from(enrolments)
-      .innerJoin(units, eq(enrolments.unitId, units.id))
-      .get()?.total ?? 0
-  );
+// The cap is per session, so the load is a number per session, not one
+// total. Sessions with nothing in them are left out.
+export function creditPointsBySession(): Map<string, number> {
+  const rows = db
+    .select({ session: enrolments.session, total: sql<number>`sum(${units.creditPoints})` })
+    .from(enrolments)
+    .innerJoin(units, eq(enrolments.unitId, units.id))
+    .groupBy(enrolments.session)
+    .all();
+  return new Map(rows.map((row) => [row.session, row.total]));
 }
 
 export type EnrolResult =
   | { ok: true; enrolment: EnrolmentWithUnit }
-  | { ok: false; reason: "not-found" | "duplicate" | "full" | "over-cap" };
+  | {
+      ok: false;
+      reason: "not-found" | "not-offered" | "bad-session" | "duplicate" | "full" | "over-cap";
+    };
 
-export function enrol(unitId: number): EnrolResult {
+export function enrol(unitId: number, session: string): EnrolResult {
   const unit = db.select().from(units).where(eq(units.id, unitId)).get();
   if (!unit) return { ok: false, reason: "not-found" };
+
+  // P&C giving a course no session means it isn't offered that year, so
+  // there is nothing to enrol in
+  const offered = sessionsFor(unitId);
+  if (offered.length === 0) return { ok: false, reason: "not-offered" };
+  // the session arrives from a form, so it is checked against the catalogue
+  // rather than trusted
+  if (!offered.includes(session)) return { ok: false, reason: "bad-session" };
 
   const already = db
     .select({ id: enrolments.id })
@@ -201,11 +322,12 @@ export function enrol(unitId: number): EnrolResult {
   // the duplicate check above means this student isn't already one of them
   if (unit.placesTaken >= unit.capacity) return { ok: false, reason: "full" };
 
-  if (totalCreditPoints() + unit.creditPoints > CREDIT_POINT_CAP) {
+  const load = creditPointsBySession().get(session) ?? 0;
+  if (load + unit.creditPoints > CREDIT_POINT_CAP) {
     return { ok: false, reason: "over-cap" };
   }
 
-  const enrolment = db.insert(enrolments).values({ unitId }).returning().get();
+  const enrolment = db.insert(enrolments).values({ unitId, session }).returning().get();
   return { ok: true, enrolment: { ...enrolment, unit } };
 }
 

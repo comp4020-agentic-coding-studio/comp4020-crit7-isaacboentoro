@@ -15,7 +15,7 @@ import { bus } from "../../lib/events";
 // open redirect.
 function backTo(form: FormData, error?: string): string {
   const params = new URLSearchParams();
-  for (const field of ["q", "career", "year"]) {
+  for (const field of ["q", "career", "year", "session"]) {
     const value = String(form.get(field) ?? "").trim();
     if (value) params.set(field, value);
   }
@@ -29,7 +29,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   const unitId = Number(form.get("unitId"));
   if (!Number.isInteger(unitId)) return redirect(backTo(form), 303);
 
-  const result = enrol(unitId);
+  // which offering of the course to enrol in — enrol() checks it is one the
+  // catalogue actually lists
+  const session = String(form.get("enrolSession") ?? "").trim();
+
+  const result = enrol(unitId, session);
   if (!result.ok) {
     if (result.reason === "not-found") return redirect(backTo(form), 303);
     return redirect(backTo(form, result.reason), 303);
