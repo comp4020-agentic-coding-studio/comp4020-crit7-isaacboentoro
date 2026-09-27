@@ -97,6 +97,46 @@ rejections exercised over HTTP — a full course (`COMP3600` 2026, 206/206),
 a duplicate, the cap at 24cp, and the redirect carrying a search back to
 where it started.
 
+## Sessions, and looking like ANU
+
+Two things were still wrong for an ANU system: the credit cap was global, so
+four First Semester courses blocked a fifth in Second, and the page was plain
+system-sans on white.
+
+Both were fixed by reading ANU's own published output rather than guessing.
+The session vocabulary came out of the catalogue itself — ten tokens, ordered
+the way P&C's own multi-session strings order them. The palette and type came
+from ANU's live stylesheet (`.../htmlsites/pc.css`): Public Sans, ANU gold
+`#be830e`, black, `#767676`, `#ebebeb`. Nothing in the theme is a colour I
+picked.
+
+Two limits I set myself there, and kept:
+
+- **Gold never carries small text on white.** `#be830e` on white is about
+  4.0:1, under the 4.5:1 floor, so gold is confined to rules, chips, focus
+  rings and button fills, and gold buttons take black text.
+- **No ANU crest, logo or wordmark.** Borrowing a design language is fair for
+  a prototype of an ANU system; wearing the identity marks would make it read
+  as the real thing. The footer says it's a student prototype.
+
+The migration was the part I was most careful about, because by then the
+deployed volume held four real enrolments — including `ASIA2065 (2027)`,
+whose course P&C gives no session, and which the new "no session means not
+offered" rule would refuse. Recreating the table would have been simpler and
+would have thrown that away. Instead the column was *added* with a default
+(`ALTER TABLE ... ADD`, safe on populated tables) and a boot-time backfill
+gives each old enrolment its course's first session, parking the
+sessionless one under `Not published`, outside every cap, droppable but not
+re-enrollable. I proved it before deploying by building the old state in a
+scratch database, restarting, and checking all four rows survived with the
+right sessions and none left blank.
+
+The test that actually pins the feature down isn't that the cap refuses —
+it's that it refuses *and then lets the next one through*: fill First
+Semester to 24cp, watch a fifth First Semester course bounce, then watch a
+Second Semester course succeed. A global cap passes the first half of that
+and fails the second.
+
 ## Before you ship
 
 `pnpm check:evidence` passing, `pnpm check` green, deployed to

@@ -23,9 +23,21 @@
   without duplicating the derivation.
 - **Enrolment rules live in `src/lib/db.ts`, not in routes.** `enrol()` is
   the one place that decides whether an enrolment is allowed (unknown
-  course, duplicate, no places, over the credit cap); API routes call it and
-  turn the result into a redirect. Don't duplicate a check in a route or a
-  page.
+  course, not offered, wrong session, duplicate, no places, over that
+  session's credit cap); API routes call it and turn the result into a
+  redirect. Don't duplicate a check in a route or a page.
+- **The credit cap is per session, never global.** A student takes 24cp in
+  First Semester *and* 24cp in Second. Anything summing credit points across
+  every enrolment is a bug.
+- **A session off a form is never trusted.** `enrol()` checks the submitted
+  session against the sessions the catalogue lists for that course, the same
+  way the redirect target is rebuilt rather than echoed.
+- **Follow ANU's published styles, don't invent them.** The palette and type
+  come from ANU's own stylesheet (Public Sans, `#be830e`, `#767676`,
+  `#ebebeb`). Two standing limits: gold is for accents, rules and button
+  fills — never small text on white, which fails contrast — and no ANU
+  crest, logo or wordmark, because this must not read as an official ANU
+  system.
 - **Never redirect to a caller-supplied URL.** A rejected enrol returns the
   student to their search, but the target is rebuilt field by field from the
   form (`backTo()` in `src/pages/api/enrolments.ts`), never echoed back from

@@ -34,14 +34,27 @@ table, and it is the one thing here a marker should not read as ANU fact.
   the catalogue is a server-rendered search over code and title with career
   and year filters, capped at 50 results and showing the true match count.
   Plain GET form, no JavaScript required.
-- **The rules are enforced, not decorative.** A full course refuses an enrol,
-  a second enrol in the same course refuses, and going over 24 credit points
-  refuses — each with a message saying which rule you hit, and each returning
-  you to the search you were reading rather than dumping you back at the top.
-  All four live in one place, `enrol()` in `src/lib/db.ts`.
+- **The credit cap is per session, which is the point.** 24 credit points is
+  a standard full-time load *in a session*, so four courses in First Semester
+  and four more in Second is a normal year, not an overload. Enrolments are
+  grouped by session, each with its own `n / 24 cp`, and a course offered in
+  several sessions makes you pick which one you're enrolling in.
+- **The rules are enforced, not decorative.** Six of them, all in one place —
+  `enrol()` in `src/lib/db.ts`: unknown course, a course with no published
+  session (in P&C that means it isn't offered), a session the course doesn't
+  run in, a second enrol in the same course, no places left, and over that
+  session's cap. Each says which rule you hit and returns you to the search
+  you were reading rather than dumping you at the top.
 - **Multi-tab live state.** Places and the credit total are shared, so
   enrolling in one tab updates every other open tab over the SSE stream; a
   stale "12 places left" is worse than none.
+- **It looks like ANU, without pretending to be ANU.** The palette and type
+  are taken from ANU's own published stylesheet — Public Sans, ANU gold
+  `#be830e`, black and the greys — rather than guessed. Gold is used for
+  accents, rules and button fills only, never small text on white, where it
+  lands around 4.0:1 and misses the 4.5:1 contrast floor. There is no ANU
+  crest, logo or wordmark anywhere: this borrows the design language, and the
+  page says in plain words that it's a student prototype.
 - **What's a judgement call, not a spec-enforced check:** there's no login —
   "my enrolments" is one shared list, so this models one student's session,
   not a multi-user system. Prerequisites, timetable clashes and program rules
