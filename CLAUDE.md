@@ -29,6 +29,28 @@
 - **The credit cap is per session, never global.** A student takes 24cp in
   First Semester *and* 24cp in Second. Anything summing credit points across
   every enrolment is a bug.
+- **Anything seeded into `units` after the first deploy needs its own
+  idempotent fill.** `seedCatalogue()` returns early when the catalogue is
+  already there, so a new column or table filled inside it stays empty on
+  the deployed volume forever. This shipped broken once — every course read
+  "Not offered" in production because `unit_sessions` was created by a
+  migration and never populated. `seedUnitSessions()`, `seedRequisites()`
+  and `seedPermissionCodes()` are each separate and each check their own
+  emptiness. `spec/upgrade.test.ts` exists to catch the next one: it boots
+  the built server twice over one database, rolling it back to the older
+  shape in between. Extend it whenever you add a fill.
+- **Never enforce a requisite that wasn't parsed unambiguously.**
+  `src/lib/requisites.ts` returns `null` for anything counted in units,
+  scoped to a level, or using the `/1140` shorthand, and for an unbracketed
+  mix of "and" and "or" — P&C reads that as `(A or B) and C`, the opposite
+  of normal precedence. A course with prose but no rule is displayed and not
+  enforced. Blocking an eligible student is a worse failure than not
+  checking.
+- **A permission code lifts exactly one rule on exactly one course.** It is
+  validated before the rules run, so a spent, unknown or wrong-course code
+  is its own refusal instead of falling through to the rule it didn't lift;
+  it is only burnt when it actually lifted something, in the same
+  transaction as the enrolment.
 - **A session off a form is never trusted.** `enrol()` checks the submitted
   session against the sessions the catalogue lists for that course, the same
   way the redirect target is rebuilt rather than echoed.

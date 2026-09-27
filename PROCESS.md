@@ -137,6 +137,50 @@ Semester to 24cp, watch a fifth First Semester course bounce, then watch a
 Second Semester course succeed. A global cap passes the first half of that
 and fails the second.
 
+## Permission codes — and shipping a broken deploy
+
+Adding permission codes meant first adding the thing they mostly excuse you
+from: prerequisites. That turned out to be the most interesting constraint in
+the whole project, because unlike the catalogue, requisites have **no bulk
+endpoint** — they exist only as prose on each course page. So I scoped the
+crawl to COMP (257 pages, rate-limited) rather than all 6,003, and wrote a
+parser that refuses more than it accepts.
+
+Of 245 requisites fetched, **42 parse into an enforceable rule and 203 don't**.
+The parser returns nothing for "6 units of 1000 level MATH", for the
+`COMP1110 /1140` shorthand, and — the case I'd have got wrong by reflex — for
+an unbracketed mix of *and* and *or*, because P&C writes
+"COMP1110 or COMP1140 AND 6 units of MATH" meaning `(A or B) AND C`, the
+opposite of normal operator precedence. Those courses show their requirement
+and enforce nothing. The asymmetry is deliberate: wrongly blocking a student
+who *is* eligible is a worse failure than not checking, and it's the failure
+a confident parser produces.
+
+The codes themselves are narrow on purpose — bound to one course, granting
+one named exception, validated *before* the rules run so a spent or
+wrong-course code is refused in its own right rather than reported as
+whichever rule it failed to lift, and burnt only when it actually lifted
+something. `spec/permissions.test.ts` is mostly about what a code *can't* do.
+
+### The deploy that broke production
+
+The session work shipped green and broke the live app completely: every
+course rendered "Not offered" and nothing could be enrolled. `seedCatalogue()`
+returns early when the catalogue already exists, so on the deployed volume
+the migration created `unit_sessions` and nothing ever filled it.
+
+Every test passed because every test ran against a database the suite had
+just created — the fresh-install path. The deployed app is never fresh. I'd
+even verified the *enrolment* backfill against a pre-existing database, but
+built that database with the new code, so it already had the table populated.
+
+The fix was a separate idempotent fill; the lesson was
+`spec/upgrade.test.ts`, which boots the built server twice over one database
+and rolls it back to the older shape in between. I confirmed it fails without
+the fix before trusting it, and extended it to cover the requisite and
+permission-code fills added here — both of which would otherwise have shipped
+with exactly the same bug.
+
 ## Before you ship
 
 `pnpm check:evidence` passing, `pnpm check` green, deployed to

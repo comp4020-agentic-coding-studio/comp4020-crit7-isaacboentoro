@@ -48,6 +48,35 @@ table, and it is the one thing here a marker should not read as ANU fact.
 - **Multi-tab live state.** Places and the credit total are shared, so
   enrolling in one tab updates every other open tab over the SSE stream; a
   stale "12 places left" is worse than none.
+- **Prerequisites, but only where they can be checked honestly.** Requisites
+  are imported from each COMP course page (`pnpm requisites:fetch`), because
+  unlike the catalogue they have no bulk endpoint. Of 245 fetched, **42 parse
+  into a rule the app enforces; 203 are shown but not enforced** — anything
+  phrased as "6 units of 1000 level MATH" or with the `COMP1110 /1140`
+  shorthand is displayed verbatim and left alone. A wrong guess here tells a
+  student they can't take a course they're eligible for, which is worse than
+  not checking. Courses outside COMP have no requisite data at all, and say
+  so with a dash rather than implying they have none.
+- **Permission codes, the way ANU actually uses them.** When a convener
+  grants an exception, you get a code. Here a code is bound to one course,
+  grants exactly one exception — `full`, `over-cap` or `prereq` — and burns
+  on use. It can't be used on another course, can't lift a rule it wasn't
+  issued for, and a spent or unknown code is refused in its own right rather
+  than quietly falling through to the rule it failed to lift. A code handed
+  over when nothing was blocking isn't spent.
+
+  Real codes come from a convener by email; these are seeded so the flow can
+  be demonstrated. **Each works once:**
+
+  | Code | Course | Lifts |
+  | --- | --- | --- |
+  | `FULL-3600-A/B/C` | COMP3600 (2026) | no places left |
+  | `PREQ-1110-A/B/C` | COMP1110 (2026) | prerequisites |
+  | `LOAD-2310-A/B/C` | COMP2310 (2026) | the 24cp session cap |
+
+  To see the prerequisite one work: enrol in COMP1110 and it refuses; add
+  COMP1100 under **Completed courses** and it lets you in; or use a
+  `PREQ-1110` code instead of completing anything.
 - **It looks like ANU, without pretending to be ANU.** The palette and type
   are taken from ANU's own published stylesheet — Public Sans, ANU gold
   `#be830e`, black and the greys — rather than guessed. Gold is used for
