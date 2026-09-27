@@ -24,6 +24,12 @@ export const units = sqliteTable(
     creditPoints: int("credit_points").notNull(),
     capacity: int().notNull(),
     placesTaken: int("places_taken").notNull(),
+    // P&C's requisite prose, and the machine-checkable rule parsed out of it
+    // when it is unambiguous (see src/lib/requisites.ts). Null rule with
+    // non-null text means the course shows its requirement but nothing is
+    // enforced — the honest state for "N units of 1000 level MATH".
+    requisiteText: text("requisite_text"),
+    requisiteRule: text("requisite_rule"),
   },
   (table) => [
     unique("units_code_year").on(table.code, table.year),
@@ -67,6 +73,28 @@ export const enrolments = sqliteTable("enrolments", {
     .default(sql`(datetime('now'))`),
 });
 
+// What the student has already passed, as course codes — a prerequisite
+// names a course, not a particular year's offering of it.
+export const completedCourses = sqliteTable("completed_courses", {
+  id: int().primaryKey({ autoIncrement: true }),
+  code: text().notNull().unique(),
+});
+
+// A permission code is what a convener issues to let someone past a rule
+// they don't meet. Each is bound to one course, grants one specific
+// exception, and burns on use.
+export const permissionCodes = sqliteTable("permission_codes", {
+  id: int().primaryKey({ autoIncrement: true }),
+  code: text().notNull().unique(),
+  unitId: int("unit_id")
+    .notNull()
+    .references(() => units.id),
+  grants: text().notNull(), // "full" | "over-cap" | "prereq"
+  usedAt: text("used_at"),
+});
+
 export type Unit = typeof units.$inferSelect;
 export type Enrolment = typeof enrolments.$inferSelect;
 export type UnitSession = typeof unitSessions.$inferSelect;
+export type CompletedCourse = typeof completedCourses.$inferSelect;
+export type PermissionCode = typeof permissionCodes.$inferSelect;
