@@ -103,13 +103,10 @@ function seedCatalogue(): void {
   const insert = client.prepare(
     "insert into units (code, title, period, career, year, credit_points, capacity, places_taken) values (?, ?, ?, ?, ?, ?, ?, ?)",
   );
-  const insertSession = client.prepare(
-    "insert into unit_sessions (unit_id, session) values (?, ?)",
-  );
   client.transaction(() => {
     for (const course of catalogue) {
       const { capacity, placesTaken } = derivePlaces(course.code, course.year);
-      const { lastInsertRowid } = insert.run(
+      insert.run(
         course.code,
         course.title,
         course.period,
@@ -119,13 +116,27 @@ function seedCatalogue(): void {
         capacity,
         placesTaken,
       );
-      for (const session of parseSessions(course.period)) {
-        insertSession.run(Number(lastInsertRowid), session);
-      }
     }
   })();
 }
 seedCatalogue();
+
+// Derived from units.period, which every row already has, so this fills in
+// on a database seeded before sessions existed as well as on a fresh one.
+// Keeping it separate from seedCatalogue() is the point: that one returns
+// early when the catalogue is already there, which on an existing volume
+// would leave this table empty and every course reading as "not offered".
+function seedUnitSessions(): void {
+  if (db.select({ id: unitSessions.id }).from(unitSessions).limit(1).all().length > 0) return;
+  const rows = db.select({ id: units.id, period: units.period }).from(units).all();
+  const insert = client.prepare("insert into unit_sessions (unit_id, session) values (?, ?)");
+  client.transaction(() => {
+    for (const row of rows) {
+      for (const session of parseSessions(row.period)) insert.run(row.id, session);
+    }
+  })();
+}
+seedUnitSessions();
 
 // Enrolments made before sessions existed carry session = "". Give each one
 // its course's first session so it still counts against a cap, and park the
