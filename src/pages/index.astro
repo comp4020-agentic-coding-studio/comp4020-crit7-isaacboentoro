@@ -1,10 +1,12 @@
 ---
 import {
   CREDIT_POINT_CAP,
+  creditPointsBySession,
   listEnrolments,
+  NOT_PUBLISHED,
   PAGE_SIZE,
   searchUnits,
-  totalCreditPoints,
+  SESSIONS,
   YEARS,
 } from "../lib/db";
 import "../styles.css";
@@ -12,22 +14,31 @@ import "../styles.css";
 const params = Astro.url.searchParams;
 const q = (params.get("q") ?? "").trim();
 const career = (params.get("career") ?? "").trim();
+const session = (params.get("session") ?? "").trim();
 const year = Number(params.get("year")) || undefined;
 
-const results = searchUnits({ q, career, year });
+const results = searchUnits({ q, career, year, session });
 const enrolments = listEnrolments();
-const credits = totalCreditPoints();
+const load = creditPointsBySession();
 
 const CAREERS = ["Undergraduate", "Postgraduate", "Research"];
+
+// enrolled sessions in catalogue order, with the legacy bucket last
+const enrolledSessions = [
+  ...SESSIONS.filter((name) => enrolments.some((e) => e.session === name)),
+  ...(enrolments.some((e) => e.session === NOT_PUBLISHED) ? [NOT_PUBLISHED] : []),
+];
 
 const errorMessage = {
   full: "That course has no places left.",
   duplicate: "You're already enrolled in that course.",
-  "over-cap": `Enrolling would take you over the ${CREDIT_POINT_CAP} credit point cap for the session.`,
+  "not-offered": "That course has no published session, so it isn't offered.",
+  "bad-session": "That course isn't offered in the session you picked.",
+  "over-cap": `That would take that session over the ${CREDIT_POINT_CAP} credit point cap.`,
 }[params.get("error") ?? ""];
 
 // carried through the enrol form so a rejection returns you to this search
-const searchState = { q, career, year: year ? String(year) : "" };
+const searchState = { q, career, session, year: year ? String(year) : "" };
 ---
 
 <!doctype html>
@@ -36,74 +47,120 @@ const searchState = { q, career, year: year ? String(year) : "" };
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Enrolment — ANU course catalogue</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&display=swap"
+    />
   </head>
   <body>
     <nav aria-label="site">
-      <a href="/">Enrolment</a>
-      <a href="/readme/">About</a>
+      <div class="nav-inner">
+        <span class="wordmark">Enrolment</span>
+        <span class="nav-links">
+          <a href="/">Catalogue</a>
+          <a href="/readme/">About</a>
+        </span>
+      </div>
     </nav>
     <main>
       <h1>Enrolment</h1>
-      <p>
-        Search the ANU course catalogue and enrol, with the two rules that
+      <p class="lede">
+        Search the ANU course catalogue and enrol, with the rules that
         actually bite enforced before you click rather than after: a course
-        with no places left, and the {CREDIT_POINT_CAP} credit point cap for
-        the session.
+        with no places left, one that isn't offered, and the {CREDIT_POINT_CAP}cp
+        cap — which applies to each session on its own, so a full First
+        Semester doesn't stop you loading Second.
       </p>
 
       {errorMessage && <p role="alert" id="error">{errorMessage}</p>}
 
       <h2>My enrolments</h2>
-      <p id="credit-total">
-        <span id="credit-count">{credits}</span> / {CREDIT_POINT_CAP} credit points
-      </p>
       {
         enrolments.length === 0 ? (
           <p>Nothing enrolled yet — search the catalogue below.</p>
         ) : (
-          <ul id="enrolments">
-            {enrolments.map((enrolment) => (
-              <li>
-                <span>
-                  {enrolment.unit.code} ({enrolment.unit.year}) — {enrolment.unit.title} (
-                  {enrolment.unit.creditPoints}cp)
-                </span>
-                <form method="post" action={`/api/enrolments/${enrolment.id}/drop`}>
-                  <button>Drop</button>
-                </form>
-              </li>
+          <div id="enrolments">
+            {enrolledSessions.map((name) => (
+              <section class="session-group" data-session={name}>
+                <h3>
+                  {name}
+                  {name === NOT_PUBLISHED ? (
+                    <span class="cap-note">no longer offered — outside the cap</span>
+                  ) : (
+                    <span class="cap">
+                      <span class="cap-used">{load.get(name) ?? 0}</span> / {CREDIT_POINT_CAP} cp
+                    </span>
+                  )}
+                </h3>
+                <ul>
+                  {enrolments
+                    .filter((enrolment) => enrolment.session === name)
+                    .map((enrolment) => (
+                      <li>
+                        <span>
+                          <strong>{enrolment.unit.code}</strong> ({enrolment.unit.year}) —{" "}
+                          {enrolment.unit.title} ({enrolment.unit.creditPoints}cp)
+                        </span>
+                        <form method="post" action={`/api/enrolments/${enrolment.id}/drop`}>
+                          <button class="ghost">Drop</button>
+                        </form>
+                      </li>
+                    ))}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
         )
       }
 
       <h2>Course catalogue</h2>
       <form method="get" action="/" id="search">
-        <label for="q">Search by code or title</label>
-        <input id="q" name="q" value={q} placeholder="COMP1100, or 'algorithms'" />
-        <label for="career">Career</label>
-        <select id="career" name="career">
-          <option value="">All</option>
-          {
-            CAREERS.map((option) => (
-              <option value={option} selected={option === career}>
-                {option}
-              </option>
-            ))
-          }
-        </select>
-        <label for="year">Year</label>
-        <select id="year" name="year">
-          <option value="">All</option>
-          {
-            YEARS.map((option) => (
-              <option value={option} selected={option === year}>
-                {option}
-              </option>
-            ))
-          }
-        </select>
-        <button>Search</button>
+        <p class="field">
+          <label for="q">Search by code or title</label>
+          <input id="q" name="q" value={q} placeholder="COMP1100, or 'machine learning'" />
+        </p>
+        <p class="field">
+          <label for="session">Session</label>
+          <select id="session" name="session">
+            <option value="">All</option>
+            {
+              SESSIONS.map((option) => (
+                <option value={option} selected={option === session}>
+                  {option}
+                </option>
+              ))
+            }
+          </select>
+        </p>
+        <p class="field">
+          <label for="career">Career</label>
+          <select id="career" name="career">
+            <option value="">All</option>
+            {
+              CAREERS.map((option) => (
+                <option value={option} selected={option === career}>
+                  {option}
+                </option>
+              ))
+            }
+          </select>
+        </p>
+        <p class="field">
+          <label for="year">Year</label>
+          <select id="year" name="year">
+            <option value="">All</option>
+            {
+              YEARS.map((option) => (
+                <option value={option} selected={option === year}>
+                  {option}
+                </option>
+              ))
+            }
+          </select>
+        </p>
+        <p class="field"><button>Search</button></p>
       </form>
 
       <p id="result-count">
@@ -114,42 +171,63 @@ const searchState = { q, career, year: year ? String(year) : "" };
       {
         results.total > 0 && (
           <div class="table-scroll">
-          <table id="catalogue">
-            <thead>
-              <tr>
-                <th scope="col">Code</th>
-                <th scope="col">Title</th>
-                <th scope="col">Year</th>
-                <th scope="col">Session</th>
-                <th scope="col">CP</th>
-                <th scope="col">Places</th>
-                <th scope="col">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.units.map((unit) => (
-                <tr data-unit-id={unit.id}>
-                  <td>{unit.code}</td>
-                  <td>{unit.title}</td>
-                  <td>{unit.year}</td>
-                  <td>{unit.period || "Not published"}</td>
-                  <td>{unit.creditPoints}</td>
-                  <td class="places">
-                    {unit.enrolledCount}/{unit.capacity}
-                  </td>
-                  <td>
-                    <form method="post" action="/api/enrolments">
-                      <input type="hidden" name="unitId" value={unit.id} />
-                      <input type="hidden" name="q" value={searchState.q} />
-                      <input type="hidden" name="career" value={searchState.career} />
-                      <input type="hidden" name="year" value={searchState.year} />
-                      <button disabled={unit.full}>{unit.full ? "Full" : "Enrol"}</button>
-                    </form>
-                  </td>
+            <table id="catalogue">
+              <thead>
+                <tr>
+                  <th scope="col">Code</th>
+                  <th scope="col">Title</th>
+                  <th scope="col">Year</th>
+                  <th scope="col">Sessions</th>
+                  <th scope="col">CP</th>
+                  <th scope="col">Places</th>
+                  <th scope="col">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {results.units.map((unit) => (
+                  <tr data-unit-id={unit.id}>
+                    <td><strong>{unit.code}</strong></td>
+                    <td>{unit.title}</td>
+                    <td>{unit.year}</td>
+                    <td class="sessions">
+                      {unit.sessions.length === 0 ? (
+                        <span class="chip chip--none">Not offered</span>
+                      ) : (
+                        unit.sessions.map((name) => <span class="chip">{name}</span>)
+                      )}
+                    </td>
+                    <td>{unit.creditPoints}</td>
+                    <td class="places">
+                      {unit.enrolledCount}/{unit.capacity}
+                    </td>
+                    <td>
+                      <form method="post" action="/api/enrolments" class="enrol">
+                        <input type="hidden" name="unitId" value={unit.id} />
+                        <input type="hidden" name="q" value={searchState.q} />
+                        <input type="hidden" name="career" value={searchState.career} />
+                        <input type="hidden" name="year" value={searchState.year} />
+                        <input type="hidden" name="session" value={searchState.session} />
+                        {unit.sessions.length > 1 ? (
+                          <select
+                            name="enrolSession"
+                            aria-label={`Session to enrol in for ${unit.code}`}
+                          >
+                            {unit.sessions.map((name) => (
+                              <option value={name}>{name}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input type="hidden" name="enrolSession" value={unit.sessions[0] ?? ""} />
+                        )}
+                        <button disabled={unit.full || unit.sessions.length === 0}>
+                          {unit.sessions.length === 0 ? "Not offered" : unit.full ? "Full" : "Enrol"}
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )
       }
@@ -157,12 +235,13 @@ const searchState = { q, career, year: year ? String(year) : "" };
       <p class="note">
         Course codes, titles, sessions, careers and credit points come from
         ANU Programs and Courses. Places are this prototype's own invention —
-        the catalogue publishes no class sizes.
+        the catalogue publishes no class sizes. This is a student prototype,
+        not an ANU system.
       </p>
     </main>
     <script>
       // The live half of the demo: subscribe to the SSE stream and reload
-      // whenever another tab enrols or drops — places and the credit total
+      // whenever another tab enrols or drops — places and the session loads
       // are shared state, so every open tab needs the current numbers, not
       // just its own last action. The forms need none of this; their POST +
       // redirect re-renders the submitting tab.

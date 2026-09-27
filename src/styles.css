@@ -1,15 +1,250 @@
+/* ANU design language, taken from ANU's own published stylesheet
+   (marketing-pages.anu.edu.au/_anu/5/projects/htmlsites/pc.css): Public Sans,
+   ANU gold #be830e, black, and the greys #767676 / #ebebeb.
+
+   Gold is used for accents, rules and button fills only — never for small
+   text on white, where #be830e lands around 4.0:1 and misses the 4.5:1
+   floor. Gold buttons take black text for the same reason.
+
+   No ANU crest, logo or wordmark: this borrows the design language, and
+   must not read as an official ANU system. */
+:root {
+  --gold: #be830e;
+  --gold-dark: #8f6209;
+  --black: #000;
+  --ink: #1a1a1a;
+  --grey: #767676;
+  --rule: #ebebeb;
+  --tint: #faf6ef;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
-  padding: 2rem;
-  font-family: system-ui, sans-serif;
+  color: var(--ink);
+  background: #fff;
+  font-family: "Public Sans", system-ui, -apple-system, sans-serif;
   line-height: 1.6;
-  color: #1a1a1a;
+}
+
+nav {
+  background: var(--black);
+  border-bottom: 4px solid var(--gold);
+}
+
+.nav-inner {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 0.9rem 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.wordmark {
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nav-links {
+  display: flex;
+  gap: 1.25rem;
+}
+
+nav a {
+  color: #fff;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+
+nav a:hover,
+nav a:focus-visible {
+  border-bottom-color: var(--gold);
 }
 
 main {
-  max-width: 64rem;
+  max-width: 68rem;
   margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
 }
+
+h1 {
+  font-size: clamp(2rem, 5vw, 2.75rem);
+  line-height: 1.15;
+  margin: 0.5rem 0 0.75rem;
+}
+
+h2 {
+  margin-top: 2.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 3px solid var(--gold);
+  font-size: 1.4rem;
+}
+
+h3 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 1.25rem 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.lede {
+  max-width: 48rem;
+  font-size: 1.05rem;
+}
+
+a {
+  color: #0b4ea2;
+}
+
+/* rules */
+
+#error {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  background: var(--tint);
+  border-left: 5px solid var(--gold);
+  font-weight: 600;
+}
+
+/* enrolments, grouped by session */
+
+.session-group {
+  margin-bottom: 1.25rem;
+}
+
+.session-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.session-group li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.cap {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.cap-note,
+.note {
+  color: var(--grey);
+  font-weight: 400;
+  font-size: 0.9rem;
+}
+
+.note {
+  max-width: 48rem;
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+/* search */
+
+#search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: flex-end;
+  margin: 1.25rem 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+.field:first-child {
+  flex: 1 1 18rem;
+}
+
+label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--grey);
+}
+
+input,
+select {
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--grey);
+  background: #fff;
+  color: var(--ink);
+}
+
+button {
+  font: inherit;
+  font-weight: 700;
+  padding: 0.45rem 1.1rem;
+  border: 1px solid var(--gold-dark);
+  background: var(--gold);
+  color: var(--black);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--gold-dark);
+  color: #fff;
+}
+
+button:disabled {
+  background: var(--rule);
+  border-color: #ccc;
+  color: var(--grey);
+  cursor: not-allowed;
+}
+
+button.ghost {
+  background: #fff;
+  border-color: var(--grey);
+  color: var(--ink);
+  font-weight: 600;
+  padding: 0.3rem 0.8rem;
+}
+
+button.ghost:hover {
+  background: var(--black);
+  border-color: var(--black);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+#result-count {
+  font-weight: 600;
+}
+
+/* catalogue */
 
 .table-scroll {
   overflow-x: auto;
@@ -18,64 +253,60 @@ main {
 table {
   border-collapse: collapse;
   width: 100%;
+  min-width: 52rem;
 }
 
 th,
 td {
   text-align: left;
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid #ddd;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
 }
 
-a {
-  color: #0b5fff;
+thead th {
+  background: var(--black);
+  color: #fff;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: none;
 }
 
-form {
+tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+
+.places {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chip {
+  display: inline-block;
+  margin: 0 0.25rem 0.25rem 0;
+  padding: 0.1rem 0.5rem;
+  background: var(--tint);
+  border: 1px solid var(--gold);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.chip--none {
+  background: #fff;
+  border-color: var(--rule);
+  color: var(--grey);
+}
+
+form.enrol {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.4rem;
   align-items: center;
-  margin-block: 1.5rem;
+  margin: 0;
 }
 
-input {
-  flex: 1;
-  min-width: 12rem;
-  padding: 0.4rem 0.6rem;
-  font: inherit;
-}
-
-button {
-  padding: 0.4rem 1rem;
-  font: inherit;
-}
-
-#enrolments {
-  padding-inline-start: 1.2rem;
-}
-
-#enrolments li {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  justify-content: space-between;
-}
-
-#enrolments form {
-  margin-block: 0.25rem;
-}
-
-#catalogue form {
-  margin-block: 0;
-}
-
-#search label {
-  font-weight: 600;
-}
-
-.note {
-  color: #555;
-  font-size: 0.9rem;
+form.enrol select {
+  padding: 0.3rem 0.4rem;
+  font-size: 0.85rem;
 }
