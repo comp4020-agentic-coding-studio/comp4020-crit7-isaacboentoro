@@ -5,7 +5,18 @@ import { and, asc, eq, exists, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import catalogue from "../data/courses.json";
-import { type Enrolment, enrolments, type Unit, units, unitSessions } from "./schema";
+import requisites from "../data/requisites.json";
+import { codesIn, meetsRequisite, type Rule } from "./requisites";
+import {
+  completedCourses,
+  type Enrolment,
+  enrolments,
+  type PermissionCode,
+  permissionCodes,
+  type Unit,
+  units,
+  unitSessions,
+} from "./schema";
 
 // One SQLite file is the app's whole persistent state. In production
 // fly.toml points DATABASE_PATH at the machine's volume (/data), which is
@@ -138,6 +149,66 @@ function seedUnitSessions(): void {
 }
 seedUnitSessions();
 
+// Same shape as seedUnitSessions, and for the same reason: seedCatalogue()
+// returns early on an existing catalogue, so anything added to `units` after
+// the first deploy has to fill itself in separately or it stays null forever
+// on the deployed volume.
+function seedRequisites(): void {
+  const already = db
+    .select({ id: units.id })
+    .from(units)
+    .where(sql`${units.requisiteText} is not null`)
+    .limit(1)
+    .all();
+  if (already.length > 0) return;
+  const update = client.prepare(
+    "update units set requisite_text = ?, requisite_rule = ? where code = ? and year = ?",
+  );
+  client.transaction(() => {
+    for (const entry of requisites) {
+      update.run(
+        entry.text,
+        entry.rule === null ? null : JSON.stringify(entry.rule),
+        entry.code,
+        entry.year,
+      );
+    }
+  })();
+}
+seedRequisites();
+
+// The pool of permission codes a convener has "issued". Real ones come from
+// a course convener by email; these are seeded and listed in README.md so
+// the flow can be demonstrated. Each is bound to one course, grants one
+// exception, and burns on use — hence several per scenario.
+const SEEDED_CODES: { course: string; year: number; grants: Grants; codes: string[] }[] = [
+  // COMP3600 2026 is one of the courses the seed derives as full
+  { course: "COMP3600", year: 2026, grants: "full", codes: ["FULL-3600-A", "FULL-3600-B", "FULL-3600-C"] },
+  // COMP1110 2026 requires COMP1100 or COMP1130 or COMP1730
+  { course: "COMP1110", year: 2026, grants: "prereq", codes: ["PREQ-1110-A", "PREQ-1110-B", "PREQ-1110-C"] },
+  // for going over a session's 24cp cap
+  { course: "COMP2310", year: 2026, grants: "over-cap", codes: ["LOAD-2310-A", "LOAD-2310-B", "LOAD-2310-C"] },
+];
+
+function seedPermissionCodes(): void {
+  if (db.select({ id: permissionCodes.id }).from(permissionCodes).limit(1).all().length > 0) return;
+  const insert = client.prepare(
+    "insert into permission_codes (code, unit_id, grants) values (?, ?, ?)",
+  );
+  client.transaction(() => {
+    for (const entry of SEEDED_CODES) {
+      const unit = db
+        .select({ id: units.id })
+        .from(units)
+        .where(and(eq(units.code, entry.course), eq(units.year, entry.year)))
+        .get();
+      if (!unit) continue;
+      for (const code of entry.codes) insert.run(code, unit.id, entry.grants);
+    }
+  })();
+}
+seedPermissionCodes();
+
 // Enrolments made before sessions existed carry session = "". Give each one
 // its course's first session so it still counts against a cap, and park the
 // ones whose course publishes none under NOT_PUBLISHED rather than deleting
@@ -261,6 +332,8 @@ export function searchUnits(search: CourseSearch): SearchResults {
       creditPoints: units.creditPoints,
       capacity: units.capacity,
       placesTaken: units.placesTaken,
+      requisiteText: units.requisiteText,
+      requisiteRule: units.requisiteRule,
       enrolledCount,
     })
     .from(units)
@@ -304,14 +377,57 @@ export function creditPointsBySession(): Map<string, number> {
   return new Map(rows.map((row) => [row.session, row.total]));
 }
 
+// What the student has already passed. Prerequisites name a course, not a
+// year's offering of it, so these are bare codes.
+export function listCompleted(): string[] {
+  return db
+    .select({ code: completedCourses.code })
+    .from(completedCourses)
+    .orderBy(asc(completedCourses.code))
+    .all()
+    .map((row) => row.code);
+}
+
+export function addCompleted(code: string): boolean {
+  const tidy = code.trim().toUpperCase();
+  if (!/^[A-Z]{4}\d{4}[A-Z]?$/.test(tidy)) return false;
+  db.insert(completedCourses).values({ code: tidy }).onConflictDoNothing().run();
+  return true;
+}
+
+export function removeCompleted(code: string): void {
+  db.delete(completedCourses).where(eq(completedCourses.code, code.trim().toUpperCase())).run();
+}
+
+export function ruleFor(unit: Pick<Unit, "requisiteRule">): Rule | null {
+  return unit.requisiteRule ? (JSON.parse(unit.requisiteRule) as Rule) : null;
+}
+
+/** The courses a rule asks for that haven't been completed. */
+export function missingFor(unit: Pick<Unit, "requisiteRule">, completed: Set<string>): string[] {
+  const rule = ruleFor(unit);
+  if (!rule || meetsRequisite(rule, completed)) return [];
+  return codesIn(rule).filter((code) => !completed.has(code));
+}
+
+export type Grants = "full" | "over-cap" | "prereq";
+
 export type EnrolResult =
-  | { ok: true; enrolment: EnrolmentWithUnit }
+  | { ok: true; enrolment: EnrolmentWithUnit; usedCode?: string }
   | {
       ok: false;
-      reason: "not-found" | "not-offered" | "bad-session" | "duplicate" | "full" | "over-cap";
+      reason:
+        | "not-found"
+        | "not-offered"
+        | "bad-session"
+        | "duplicate"
+        | "prereq"
+        | "full"
+        | "over-cap"
+        | "bad-code";
     };
 
-export function enrol(unitId: number, session: string): EnrolResult {
+export function enrol(unitId: number, session: string, permissionCode?: string): EnrolResult {
   const unit = db.select().from(units).where(eq(units.id, unitId)).get();
   if (!unit) return { ok: false, reason: "not-found" };
 
@@ -330,16 +446,64 @@ export function enrol(unitId: number, session: string): EnrolResult {
     .get();
   if (already) return { ok: false, reason: "duplicate" };
 
+  // A code is checked up front, so a wrong or spent one is told about
+  // rather than quietly ignored and reported as whichever rule it failed to
+  // lift. It must be unused and issued for *this* course.
+  let ticket: PermissionCode | undefined;
+  const offered_code = permissionCode?.trim().toUpperCase();
+  if (offered_code) {
+    ticket = db
+      .select()
+      .from(permissionCodes)
+      .where(eq(permissionCodes.code, offered_code))
+      .get();
+    if (!ticket || ticket.usedAt !== null || ticket.unitId !== unitId) {
+      return { ok: false, reason: "bad-code" };
+    }
+  }
+  // a code lifts exactly the one exception it was issued for
+  const excuses = (reason: Grants): boolean => ticket?.grants === reason;
+
+  const rule = ruleFor(unit);
+  if (rule && !meetsRequisite(rule, new Set(listCompleted())) && !excuses("prereq")) {
+    return { ok: false, reason: "prereq" };
+  }
+
   // the duplicate check above means this student isn't already one of them
-  if (unit.placesTaken >= unit.capacity) return { ok: false, reason: "full" };
+  if (unit.placesTaken >= unit.capacity && !excuses("full")) {
+    return { ok: false, reason: "full" };
+  }
 
   const load = creditPointsBySession().get(session) ?? 0;
-  if (load + unit.creditPoints > CREDIT_POINT_CAP) {
+  if (load + unit.creditPoints > CREDIT_POINT_CAP && !excuses("over-cap")) {
     return { ok: false, reason: "over-cap" };
   }
 
-  const enrolment = db.insert(enrolments).values({ unitId, session }).returning().get();
-  return { ok: true, enrolment: { ...enrolment, unit } };
+  // Burn the code only if a rule actually needed lifting — a code handed
+  // over when nothing was blocking stays usable. Stamped in the same
+  // transaction as the insert so a code can't be spent without an enrolment.
+  const needed =
+    ticket !== undefined &&
+    ((ticket.grants === "prereq" && rule !== null && !meetsRequisite(rule, new Set(listCompleted()))) ||
+      (ticket.grants === "full" && unit.placesTaken >= unit.capacity) ||
+      (ticket.grants === "over-cap" && load + unit.creditPoints > CREDIT_POINT_CAP));
+
+  const enrolment = client.transaction(() => {
+    const row = db.insert(enrolments).values({ unitId, session }).returning().get();
+    if (needed && ticket) {
+      db.update(permissionCodes)
+        .set({ usedAt: new Date().toISOString() })
+        .where(eq(permissionCodes.id, ticket.id))
+        .run();
+    }
+    return row;
+  })();
+
+  return {
+    ok: true,
+    enrolment: { ...enrolment, unit },
+    ...(needed && ticket ? { usedCode: ticket.code } : {}),
+  };
 }
 
 export function dropEnrolment(id: number): boolean {
